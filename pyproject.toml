@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "solarsystemcalculator"
 version = "1.0.0"
 description = "Professional-grade orbital mechanics calculator for solar system bodies with 3D visualization and ML correction models."
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
