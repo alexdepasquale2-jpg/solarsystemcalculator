@@ -6,10 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "solarsystemcalculator"
 version = "1.0.0"
 description = "Professional-grade orbital mechanics calculator for solar system bodies with 3D visualization and ML correction models."
-readme = "README.md"
-readme-content-type = "text/markdown"
+readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.9"
 license = {text = "MIT"}
+# ... rest of your config
 authors = [
     {name = "Solar System Calculator Contributors"}
 ]
