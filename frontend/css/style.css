@@ -1,0 +1,631 @@
+/*
+ * Mobile-first styling for a generated game.
+ *
+ * Two constraints shape everything here:
+ *
+ * 1. The palette is not known at authoring time. Resource colours, the accent,
+ *    and the background hue all come from the seed, so every colour that varies
+ *    per run is a CSS custom property set by JS. Nothing in this file hardcodes a
+ *    hue that the generator owns.
+ *
+ * 2. Thumbs, not cursors. Tap targets are >=48px, the primary actions sit at the
+ *    bottom of the screen where a thumb rests, and nothing important requires
+ *    scrolling. :hover is never load-bearing.
+ */
+
+:root {
+  /* Overwritten per run by app.js from the generated theme. */
+  --accent: #7cc4ff;
+  --secondary: #ffb27c;
+  --hue: 210;
+
+  --bg: #0b0e14;
+  --bg-raised: #141924;
+  --bg-card: #171d29;
+  --bg-card-hi: #1e2534;
+  --line: #263041;
+  --text: #e8edf7;
+  --text-dim: #8b97ad;
+  --text-faint: #5b667a;
+  --good: #62d29a;
+  --bad: #ff7a7a;
+
+  --radius: 14px;
+  --tap: 48px;
+  --pad: 14px;
+
+  /* Safe areas so the tab bar clears the iOS home indicator. */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --rail-h: 0px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* The page itself never scrolls sideways; wide content scrolls inside its own box. */
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  /* Kill the grey tap flash and the double-tap-to-zoom delay. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+body {
+  /* A faint wash tinted by the run's hue, so two runs do not look identical
+     even before you read a single name. */
+  background-image: radial-gradient(
+    120% 60% at 50% 0%,
+    hsl(var(--hue) 45% 14%) 0%,
+    var(--bg) 62%
+  );
+  background-attachment: fixed;
+  padding-bottom: calc(var(--tap) + 26px + var(--safe-b));
+}
+
+/* ---------------------------------------------------------------- boot ---- */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  transition: opacity .3s ease;
+}
+.boot.is-gone { opacity: 0; pointer-events: none; }
+.boot-inner { text-align: center; color: var(--text-dim); }
+.boot-spinner {
+  width: 34px; height: 34px;
+  margin: 0 auto 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* -------------------------------------------------------------- topbar ---- */
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: calc(var(--safe-t) + 12px) var(--pad) 8px;
+}
+.topbar-main { min-width: 0; flex: 1; }
+.topbar h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+.flavor {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  /* Flavour text is generated and can run long; two lines then ellipsis. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.icon-btn:active { background: var(--bg-card-hi); }
+
+/* ----------------------------------------------------------- resources ---- */
+
+.resources {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  padding: 8px var(--pad) 10px;
+  /* Horizontal scroll is contained here rather than on the body: a run with six
+     resources must not make the whole page pan. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: linear-gradient(var(--bg) 65%, transparent);
+  backdrop-filter: blur(8px);
+}
+.resources::-webkit-scrollbar { display: none; }
+
+.res {
+  flex: 0 0 auto;
+  min-width: 108px;
+  padding: 8px 11px 9px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--res, var(--accent));
+  border-radius: 11px;
+  background: var(--bg-raised);
+}
+.res-name {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.res-amount {
+  font-variant-numeric: tabular-nums;
+  font-size: 17px;
+  font-weight: 640;
+  color: var(--res, var(--text));
+  line-height: 1.2;
+}
+.res-rate {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.res-rate.is-negative { color: var(--bad); }
+.res-bar {
+  margin-top: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.res-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--res, var(--accent));
+  transition: width .25s linear;
+}
+.res.is-full .res-bar > i { background: var(--bad); }
+
+/* -------------------------------------------------------------- panels ---- */
+
+main { padding: 4px var(--pad) 0; }
+.panel[hidden] { display: none; }
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 16px 2px 8px;
+}
+.section-head h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.section-head .count { font-size: 11px; color: var(--text-faint); }
+
+.empty {
+  padding: 22px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------- actions ---- */
+
+.actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 520px) {
+  .actions { grid-template-columns: 1fr 1fr; }
+}
+
+.action {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 68px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  /* No transition on transform: the press feedback has to feel instant. */
+}
+.action:active:not(:disabled) {
+  transform: scale(.985);
+  background: var(--bg-card-hi);
+}
+.action:disabled { opacity: .5; cursor: default; }
+.action.is-primary {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 12%, var(--bg-card)),
+    var(--bg-card)
+  );
+}
+.action-name { font-weight: 620; font-size: 15px; }
+.action-desc {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.action-flow {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.action-arrow { color: var(--text-faint); }
+
+/* Cooldown sweep. Width is set inline from ready_in, so a partially-cooled
+   button reads as partially cooled rather than just disabled. */
+.action-cool {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  transition: width .1s linear;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chip.is-short { border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); color: var(--bad); }
+.chip .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--res, var(--accent));
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------ locked ------ */
+
+.locked {
+  border-style: dashed;
+  background: transparent;
+}
+.locked .action-name, .locked .card-name { color: var(--text-faint); }
+.lock-gate {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.lock-bar {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.lock-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--text-faint);
+  transition: width .3s ease;
+}
+
+/* --------------------------------------------------------------- cards ---- */
+
+.cards { display: grid; gap: 10px; }
+@media (min-width: 620px) {
+  .cards { grid-template-columns: 1fr 1fr; }
+}
+
+.card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.card-name { font-weight: 620; font-size: 14.5px; }
+.card-sub {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.card-owned {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+}
+.card-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.card-buy {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.btn {
+  min-height: var(--tap);
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.btn:active:not(:disabled) { background: var(--bg-card-hi); transform: scale(.985); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn-primary {
+  flex: 1;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+  color: var(--text);
+}
+.btn-max { flex: 0 0 auto; min-width: 74px; }
+.btn-wide { width: 100%; margin-top: 14px; }
+.btn-danger {
+  border-color: color-mix(in srgb, var(--secondary) 55%, var(--line));
+  background: color-mix(in srgb, var(--secondary) 16%, var(--bg-raised));
+}
+
+.card.is-owned { opacity: .55; }
+.card.is-throttled { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.throttle {
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--bad);
+}
+.effect {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+.family {
+  font-size: 10.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------- mechanics ---- */
+
+.mechanics { display: grid; gap: 8px; }
+.mech {
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--secondary);
+  border-radius: 11px;
+  background: var(--bg-raised);
+}
+.mech-name { font-size: 13px; font-weight: 620; }
+.mech-kind {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.mech-desc { margin-top: 3px; font-size: 12.5px; color: var(--text-dim); }
+.mech-live {
+  margin-top: 5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--secondary);
+}
+
+/* ---------------------------------------------------------- prestige ----- */
+
+.prestige-head {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--secondary) 14%, var(--bg-card)),
+    var(--bg-card)
+  );
+  margin-bottom: 4px;
+}
+.prestige-head h2 { margin: 0 0 2px; font-size: 17px; }
+.prestige-head .hint { color: var(--text-dim); font-size: 13px; margin: 0 0 12px; }
+.prestige-nums {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.prestige-num .k {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-faint);
+}
+.prestige-num .v {
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--secondary);
+}
+
+/* -------------------------------------------------------------- tabbar ---- */
+
+.tabbar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 5px 6px calc(5px + var(--safe-b));
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+}
+.tab {
+  position: relative;
+  min-height: var(--tap);
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab.is-active { background: var(--bg-raised); color: var(--accent); }
+.tab .badge {
+  position: absolute;
+  top: 8px;
+  right: 50%;
+  margin-right: -30px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* -------------------------------------------------------------- toasts ---- */
+
+.toasts {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: calc(var(--tap) + 18px + var(--safe-b));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+  padding: 0 var(--pad);
+}
+.toast {
+  max-width: 100%;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-card-hi) 94%, transparent);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  animation: toast-in .18s ease, toast-out .3s ease 1.1s forwards;
+}
+.toast.is-crit { border-color: var(--secondary); color: var(--secondary); font-weight: 650; }
+.toast.is-good { border-color: color-mix(in srgb, var(--good) 60%, var(--line)); }
+.toast.is-bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); color: var(--bad); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-6px); } }
+
+/* ---------------------------------------------------------------- menu ---- */
+
+.menu {
+  width: min(440px, calc(100vw - 28px));
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg-raised);
+  color: var(--text);
+}
+.menu::backdrop { background: rgb(0 0 0 / .6); }
+.menu h2 {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.menu h2:first-child { margin-top: 0; }
+.menu-seed { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); }
+.menu-seed code {
+  font-size: 14px;
+  color: var(--accent);
+  background: var(--bg-card);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.menu-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.menu-stats div { display: flex; justify-content: space-between; gap: 8px; }
+.menu-stats span { color: var(--text-faint); }
+.menu-stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.menu-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.menu-actions .btn { flex: 1; min-width: 120px; }
+.input {
+  flex: 1;
+  min-width: 120px;
+  min-height: var(--tap);
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 15px;
+}
+.hint { font-size: 12.5px; color: var(--text-faint); margin: 0 0 10px; }
+
+/* --------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+  .action:active:not(:disabled) { transform: none; }
+}
+
+/*
+ * Deliberately dark in both colour schemes. The generated palette picks
+ * lightness in the 58-72% band (see rng.hue_palette), which is chosen for
+ * contrast against a dark background; re-tinting for light mode would mean
+ * generating a second palette and revalidating contrast for every seed. The
+ * game commits to one look instead.
+ */
+@media (prefers-color-scheme: light) {
+  :root { color-scheme: dark; }
+}

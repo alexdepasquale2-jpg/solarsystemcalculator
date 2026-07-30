@@ -1,542 +1,276 @@
 # CLAUDE.md
 
-Guidance for building a fully generative, emergent incremental mobile game.
+Working notes for AI assistants and developers on **incgame**, a generative
+incremental game. Read `README.md` first for what the game is; this file is about
+how to change it without breaking it.
 
-## Project Vision
+## The one rule
 
-**Generative Incremental Engine** — A procedurally generated incremental mobile game where **every session is unique**. Each play session generates:
+**Every seed is a different game, and no seed may be unplayable.**
 
-- Unique resource types, actions, and mechanics
-- Emergent gameplay from system interactions (not hand-coded)
-- Unique UI, narrative framing, progression paths
-- Unique upgrade trees, prestige mechanics, meta-progression
-- Unique names, descriptions, flavor text
+Those two halves pull against each other, and almost every design decision in the
+codebase is a resolution of that tension. Variety is the product, so the generator
+is given wide latitude. But a generated run that soft-locks is indistinguishable
+from a crash to the player, and there are two billion seeds, so latitude has to be
+bounded by machine-checked invariants rather than by taste.
 
-The game should feel like a different game every time you play, yet always follow the **incremental genre core**: accumulate resources, buy upgrades, reset for bonuses, repeat. Everything else emerges from the generated systems.
+Concretely: **do not hand-author content, and do not special-case seeds.** If a
+particular seed plays badly, the fix goes in `TUNING` or in a generation rule, and
+is verified across hundreds of seeds with `python -m incgame balance`. A fix that
+only helps seed 348 is not a fix.
 
-## Architecture
+## Quick start
 
-**Backend (Python):**
-- Game engine and state management
-- Procedural generation (resources, mechanics, interactions)
-- Action resolution and tick processing
-- Save/load serialization
-- API for the frontend
+No dependencies. Python 3.9+.
 
-**Frontend (HTML5/JavaScript):**
-- Real-time UI rendering
-- Click handlers and input processing
-- Mobile-optimized layout
-- WebSocket or fetch communication with backend
-- Local caching of game state
+```bash
+python -m incgame serve                      # play at http://127.0.0.1:8000
+python -m incgame generate --seed 42         # print a run's content
+python -m incgame simulate --seed 42         # autoplay, report pacing
+python -m incgame balance --runs 400         # audit many seeds
 
-**Communication:**
-- REST API or WebSocket for real-time updates
-- Frontend sends actions (click, buy, prestige, etc.)
-- Backend returns new state, resources gained, notifications
-- Minimal latency (aim for <100ms round-trip on good connection)
+python -m unittest discover -s tests         # 113 tests, no deps
+python -m unittest tests.test_engine         # one module (fast)
+```
+
+The balance tests take ~2 minutes; everything else is a few seconds. When
+iterating on generation, run `tests.test_generator` (fast, property-based) plus a
+`balance --runs 100` before the full suite.
+
+## Layout
 
 ```
-backend/
-  game/
-    __init__.py
-    engine.py              Main GameEngine; tick loop, state management
-    generator.py           Procedural generation (resources, actions, upgrades)
-    emergence.py           Interaction systems; how mechanics affect each other
-    serializer.py          Save/load game state
-    world.py               World state; current resources, owned upgrades, etc.
-  resources/
-    base.py                Resource class; rate, caps, conversions
-    generator.py           Generate unique resource types
-  actions/
-    base.py                Action class; cost, reward, effects
-    generator.py           Generate unique action types
-  upgrades/
-    base.py                Upgrade class; effects on resources/actions
-    generator.py           Generate tech trees, prestige multipliers
-  mechanics/
-    base.py                Mechanic base class
-    synergy.py             Interactions between mechanics (emergence)
-    generator.py           Generate unique mechanical systems
-  api/
-    server.py              FastAPI or Flask web server
-    routes.py              /state, /action, /save, /prestige, etc.
-  config.py                Game tuning parameters (generation seeds, balance)
-
+incgame/
+  generator.py   seed -> GameDef. Pure function of the seed. All balance in TUNING.
+  model.py       frozen dataclasses + fmt_number
+  engine.py      GameState + GameEngine: ticking, spending, gates, prestige
+  view.py        engine -> client payload, and what is revealed yet
+  balance.py     headless autoplayer + multi-seed audit
+  save.py        seed + progress in; definition regenerated on load
+  server.py      stdlib HTTP: JSON API + static files
+  rng.py         seeded helpers: Namer, palettes, round_nice, weighted
+  names.py       word pools (data only)
 frontend/
-  index.html               Single-page app shell
-  css/
-    mobile.css             Mobile-first responsive design
-    generated.css          Dynamically injected styles (generated colors, themes)
-  js/
-    app.js                 Main app logic, state sync
-    ui.js                  Render and update UI
-    api.js                 API calls to backend
-    storage.js             LocalStorage caching
-  assets/
-    icons/                 (generated or placeholder)
-    sounds/                (optional sfx)
+  index.html; css/style.css; js/{format,api,ui,app}.js; manifest.json; icon.svg
+tests/           test_{generator,engine,save,balance,server,format_parity}.py
 ```
 
-## Core Concepts
-
-### 1. Resource (Procedurally Generated)
-
-Every game generates 3–8 unique resource types. Each has:
-- **Name** (generated: "Essence," "Chronons," "Whimsy")
-- **Rate** (base production per tick: 0.1/s, 5/s, etc.)
-- **Cap** (max stored before overflow; can be increased by upgrades)
-- **Display format** (raw number, exponential, custom)
-- **Flavor** (description, icon color, associated mechanical theme)
-- **Decay** (optional: resource slowly decays, encouraging spending)
-- **Conversion** (optional: converts into other resources at a ratio)
-
-Example generated resource:
-```python
-Resource(
-    id="luminescence",
-    name="Luminescence",
-    rate=0.5,  # per second
-    cap=1000,
-    color="#FFD700",  # generated
-    description="A shimmering essence that fuels reality.",
-    conversions={"ethereal_charge": 0.1}  # 1 luminescence → 0.1 ethereal charge
-)
-```
-
-### 2. Action (Procedurally Generated)
-
-Actions are things the player can do repeatedly (or hold down). Examples:
-- "Click the Void" (generates resource A)
-- "Commune with the Zeitgeist" (generates resource B, costs resource A)
-- "Resonate" (passive; generates if you own upgrade X)
-
-Each action has:
-- **Name** (generated)
-- **Cost** (0 or more resource types)
-- **Reward** (generates 0 or more resources)
-- **Cooldown** (optional; can only be used once per N seconds)
-- **Scaling** (reward grows with upgrades or owned count)
-- **Flavor** (description, animation cue)
-
-```python
-Action(
-    id="commune_zeitgeist",
-    name="Commune with the Zeitgeist",
-    cost={"luminescence": 10},
-    reward={"temporal_echo": 5},
-    cooldown=0.5,  # 500ms between clicks
-    description="Bridge the gap between moments.",
-)
-```
-
-### 3. Upgrade (Procedurally Generated)
-
-Upgrades modify the game. They appear in a tech tree and can have prerequisites. Examples:
-- "+10% Luminescence production"
-- "Unlock new action: Transcend"
-- "Luminescence no longer decays"
-- "Every 5 clicks, double your next reward"
-
-Each upgrade has:
-- **Name** (generated)
-- **Cost** (resources or prestige currency)
-- **Effect** (a function or rule that modifies game state)
-- **Prerequisite** (which other upgrades must be bought first)
-- **Tier** (early/mid/late game)
-- **Flavor** (description)
-
-```python
-Upgrade(
-    id="luminescence_production_v1",
-    name="Resonant Amplification",
-    cost={"temporal_echo": 50},
-    effect=UpgradeEffect(
-        type="multiply_resource_rate",
-        resource="luminescence",
-        multiplier=1.1
-    ),
-    prerequisite=None,
-    tier="early",
-    description="Attune to the underlying harmonics.",
-)
-```
-
-### 4. Prestige (Meta-progression)
-
-When the player can no longer progress, they prestige:
-- Reset all resources to 0
-- Reset all non-prestige upgrades
-- Gain prestige currency based on total resources ever earned
-- Prestige currency buys permanent multipliers that persist across runs
-
-This is the **meta-game loop**. Each prestige run should feel different because new upgrades become available and new mechanics emerge.
-
-## Procedural Generation Strategy
-
-### Seeding
-
-Every game session has a **seed** (can be user-provided or random). All generation is deterministic from the seed:
-```python
-def generate_game(seed: int) -> Game:
-    rng = random.Random(seed)
-    resources = generate_resources(rng)
-    actions = generate_actions(rng, resources)
-    upgrades = generate_upgrades(rng, actions, resources)
-    mechanics = generate_mechanics(rng, resources, actions, upgrades)
-    return Game(resources, actions, upgrades, mechanics, seed=seed)
-```
-
-### Generation Phases
-
-**Phase 1: Base Resources (3–8 types)**
-- Pick names from a word pool (nouns, adjectives, suffixes)
-- Assign base rates (0.1–10 per second)
-- Assign caps (1000–100,000)
-- Assign colors and themes
-
-**Phase 2: Base Actions (5–12 types)**
-- Some cost resources, some are passive
-- Costs and rewards vary; ensure some feedback loops (action A generates resource B, which fuels action C)
-- Mix of high-reward-high-cost and low-reward-no-cost
-
-**Phase 3: Upgrades (30–60 types, in tiers)**
-- Early game: unlock actions, basic multipliers
-- Mid game: resource caps, new mechanics, conversion options
-- Late game: exponential multipliers, prestige mechanics
-
-**Phase 4: Mechanics (3–5 emergent systems)**
-- **Synergy:** "If you own 5+ upgrades from the X tree, gains from Y increase"
-- **Cascades:** "Whenever you click action A, there's a 5% chance to trigger action B"
-- **Scarcity:** Some resources decay; encourages spending
-- **Gating:** Certain upgrades become available only after you hit a resource threshold
-- **Feedback loops:** Action A generates resource B, resource B unlocks upgrades that boost action A
-
-### Emergence Through Interaction
-
-The magic happens when systems interact. Don't hard-code synergies; let them emerge:
-
-```python
-# Example: Emergent synergy
-# If the generation picks:
-# - Resource A with decay
-# - Action X that converts A → B
-# - Upgrade "Halt Decay" for A
-# Then emergent strategy: buy "Halt Decay" to prevent loss, build up A, then mass-convert to B
-```
-
-Emergence is achieved by:
-1. **Asymmetric resources** — Different rates, caps, conversions
-2. **Scaling** — Upgrades apply multipliers to action rewards or resource rates
-3. **Gating** — Unlocking new actions as you reach thresholds
-4. **Feedback loops** — Earlier actions feed into later ones
-5. **Randomized costs and rewards** — Creates unique trade-offs each run
-
-## Game Loop
-
-### Backend Tick Loop
-
-```python
-class GameEngine:
-    def __init__(self, game_state):
-        self.state = game_state
-        self.last_tick = time.time()
-    
-    def tick(self):
-        """Called ~10x per second; process passive generation."""
-        now = time.time()
-        dt = now - self.last_tick
-        self.last_tick = now
-        
-        # Update passive actions (they generate automatically)
-        for action in self.state.actions:
-            if action.is_passive:
-                reward = action.calculate_reward(self.state) * dt
-                self.state.add_resource(action.reward_resource, reward)
-        
-        # Apply decay
-        for resource in self.state.resources:
-            if resource.decay > 0:
-                self.state.resources[resource.id] *= (1 - resource.decay * dt)
-        
-        # Check for gated upgrades becoming available
-        for upgrade in self.state.upgrades:
-            if not upgrade.unlocked and self._check_gate(upgrade):
-                upgrade.unlocked = True
-        
-        return self.state
-    
-    def player_action(self, action_id: str):
-        """Player clicks or activates an action."""
-        action = self.state.actions[action_id]
-        if action.can_use(self.state):
-            self.state.spend_resources(action.cost)
-            reward = action.calculate_reward(self.state)
-            self.state.add_resource(action.reward_resource, reward)
-            return {"success": True, "reward": reward}
-        else:
-            return {"success": False, "reason": "Cannot afford"}
-    
-    def buy_upgrade(self, upgrade_id: str):
-        """Player buys an upgrade."""
-        upgrade = self.state.upgrades[upgrade_id]
-        if upgrade.can_buy(self.state):
-            self.state.spend_resources(upgrade.cost)
-            upgrade.apply(self.state)
-            return {"success": True}
-        else:
-            return {"success": False, "reason": "Cannot afford"}
-    
-    def prestige(self):
-        """Player resets and enters prestige mode."""
-        prestige_points = calculate_prestige_reward(self.state)
-        self.state.prestige_currency += prestige_points
-        self.state.reset()
-        return {"prestige_earned": prestige_points}
-```
-
-### Frontend Communication
-
-```javascript
-// app.js
-class GameClient {
-    async initialize() {
-        const response = await fetch('/api/new-game');
-        this.state = await response.json();
-        this.render();
-    }
-    
-    async playerAction(actionId) {
-        const response = await fetch('/api/action', {
-            method: 'POST',
-            body: JSON.stringify({ action_id: actionId })
-        });
-        const result = await response.json();
-        if (result.success) {
-            this.state = result.state;
-            this.showNotification(`+${result.reward.toFixed(1)} resources`);
-            this.render();
-        }
-    }
-    
-    async buyUpgrade(upgradeId) {
-        const response = await fetch('/api/buy-upgrade', {
-            method: 'POST',
-            body: JSON.stringify({ upgrade_id: upgradeId })
-        });
-        const result = await response.json();
-        if (result.success) {
-            this.state = result.state;
-            this.render();
-        }
-    }
-    
-    async prestige() {
-        const response = await fetch('/api/prestige', { method: 'POST' });
-        const result = await response.json();
-        this.state = result.state;
-        this.render();
-    }
-    
-    render() {
-        // Update UI from this.state
-        // Dynamically render resources, actions, upgrades based on generated names
-    }
-    
-    tick() {
-        // Request updated state every 100ms or so
-        this.playerAction('passive-tick');
-    }
-}
-```
-
-## Key Design Constraints
-
-### Balance
-
-- **Early game:** Should be fun immediately. Clicking should give quick feedback.
-- **Mid game:** Progression slows; upgrades become essential. Strategy emerges.
-- **Late game:** Exponential scaling; players prepare for prestige.
-- **Prestige:** Reset feels like progress (multiplier upgrades make the next run faster).
-
-To ensure balance in a generative game:
-1. **Resource sinks** — Ensure players have reasons to spend resources
-2. **Pacing** — Time between meaningful upgrades should be 30 seconds to 5 minutes
-3. **Thresholds** — Milestone rewards (reach 1M resources, buy 10 upgrades, etc.)
-4. **Soft caps** — Decay, cooldowns, caps that make progress non-linear
-
-### Mobile-First
-
-- **Touch targets:** Buttons ≥48px
-- **No scroll requirement:** All critical UI visible without scrolling
-- **Minimal bandwidth:** Fetch only deltas, not full state
-- **Offline-friendly:** Game continues ticking in localStorage while closed
-- **No ads:** Pure gameplay focus
-
-### Emergent, Not Random
-
-**Bad:** Randomly assign resource names and hope they make sense.
-**Good:** Generate interconnected systems where player choices matter and strategies arise naturally.
-
-Example of emergence:
-- Resource A has no passive generation
-- Action X converts A → B
-- Upgrade "A Production" unlocks if you own 3 B-related upgrades
-- Player discovers: "I need to mass-convert A to B, then use B to unlock A production"
-
-## Development Workflow
-
-### Setup
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-pip install -e ".[dev]"  # pytest, black, ruff, mypy
-
-cd frontend
-npm install
-npm run dev
-```
-
-### Running
-
-```bash
-# Terminal 1: Backend
-python -m incremental_engine serve --port 5000
-
-# Terminal 2: Frontend dev server
-cd frontend && npm run dev
-
-# Visit http://localhost:3000
-```
-
-### Testing Generative Systems
-
-```bash
-# Test that generation is deterministic
-python -m incremental_engine generate-game --seed 42 > game1.json
-python -m incremental_engine generate-game --seed 42 > game2.json
-diff game1.json game2.json  # Should be identical
-
-# Test balance across multiple generated games
-python scripts/test_generation.py --runs 100 --log results.csv
-# Analyze: prestige timing, progression curves, resource flows
-```
-
-### Code Quality
-
-```bash
-black .
-ruff check . --fix
-mypy backend/
-pytest tests/ --cov=backend
-```
-
-## Testing Generative Systems
-
-**Unit tests:**
-- Resource generation produces valid resources
-- Actions can be executed (cost checking, reward calculation)
-- Upgrades apply effects correctly
-- Prestige math is correct
-
-**Integration tests:**
-- Full game loop: generate → tick → player action → state update
-- Multiple prestige runs; state persists correctly
-- Emergence detection: verify that generated systems have interesting interactions
-
-**Generative tests:**
-- Seed reproducibility (same seed → same game)
-- Balance analysis across 100+ generated games (prestige point curves, upgrade counts, resource flow graphs)
-- Emergence metrics (how many upgrade combinations exist? how many are useful?)
-
-Example balance test:
-```python
-def test_balance_across_seeds():
-    for seed in range(1, 101):
-        game = generate_game(seed)
-        
-        # Simulate ~5 min of play
-        state = simulate_game(game, ticks=30000)
-        
-        # Check: player should have unlocked 5–15 upgrades, not stuck
-        assert 5 <= len(state.bought_upgrades) <= 15
-        
-        # Check: prestige shouldn't be instant or impossible
-        prestige_points = calculate_prestige(state)
-        assert 10 <= prestige_points <= 1000000
-    
-    print("All 100 seeds balanced ✓")
-```
-
-## Saving & Loading
-
-Save format: JSON with full game state.
-
-```json
-{
-  "seed": 12345,
-  "timestamp": "2025-01-15T10:30:00Z",
-  "resources": {
-    "luminescence": 5000.5,
-    "temporal_echo": 150
-  },
-  "bought_upgrades": [
-    "luminescence_production_v1",
-    "unlock_commune_zeitgeist"
-  ],
-  "prestige_currency": 42,
-  "total_earned": 50000,
-  "playtime_seconds": 600
-}
-```
-
-On load: regenerate the game structure from seed, apply all bought upgrades, restore resource counts.
-
-## Distribution
-
-**Web:**
-- Host frontend as static files (Netlify, GitHub Pages)
-- Run backend on a cheap cloud server (Railway, Fly.io, Heroku)
-- Or: backend in WASM (Pyodide) so everything runs in browser
-
-**Mobile (web app):**
-- Add `manifest.json` for PWA install
-- Support offline (service worker, localStorage sync)
-
-**Desktop (future):**
-- Tauri or Electron wrapper around HTML5 frontend
-
-## Working Agreements
-
-1. **Generation is law.** If it's possible to generate, don't hard-code it.
-2. **Test every seed.** Generative systems must be tested across dozens of seeds, not just default.
-3. **Emergence over hand-craft.** Let mechanics interact naturally; don't force every synergy.
-4. **Mobile first.** Every UI decision should consider <5" screens and touch.
-5. **Balance with data.** Run generative tests frequently; tweak generation parameters, not individual games.
-6. **Seed preservation.** Always save and display the seed. Reproducibility is a feature.
-
-## Success Metrics
-
-A successful run feels like:
-- ✓ New aesthetic and names every game
-- ✓ Surprising strategy emerges (not obvious what to do)
-- ✓ Clear prestige point; player knows when to reset
-- ✓ Prestige multipliers make the next run feel different
-- ✓ 5–30 minute play loop is satisfying
-- ✓ Mobile layout is responsive and fun to play
-
-## Next Steps
-
-1. Build the generator framework (`Generator` class with seeded RNG)
-2. Implement resource, action, upgrade generation
-3. Build the game engine tick loop and state management
-4. Create a minimal frontend (hardcoded resources/actions first)
-5. Test balance across 50+ seeds
-6. Add prestige mechanics
-7. Iterate on emergence and fun factor
-8. Polish mobile UI
-9. Ship it
-
-Start with a working, boring game (hand-coded resources/actions). Once the engine is solid, plug in the generator and watch it emerge.
+Generation phases run in a fixed order and each may depend only on earlier ones:
+theme → resources → actions → generators → upgrades → mechanics → prestige. If you
+need a later phase's output in an earlier one, the phase order is wrong, not the
+dependency.
+
+## Architectural commitments
+
+These are load-bearing. Changing one means changing a lot of other things.
+
+**Zero runtime dependencies.** Engine, harness, and server are standard library
+only. `git clone && python -m incgame serve` must keep working on a bare Python
+install. New requirements go behind an optional extra in `pyproject.toml`, never
+into the core.
+
+**The definition is derived, never stored.** A save is a seed plus progress;
+`save.py` regenerates the `GameDef` on load. Saves stay ~1KB and can never
+disagree with the generator. The corollary is that **changing the generator
+invalidates old saves** — `SAVE_VERSION` and `generator_version` detect the
+mismatch and report it. `_compute_mods` also tolerates unknown ids, so a small
+change degrades to "you lost some upgrades" rather than crashing.
+
+**The clock is injected.** `GameEngine(game, clock=...)`. The live game, offline
+catch-up, and the balance harness all run the same `advance()` path — the harness
+simulates twenty minutes in about a second and nothing sleeps. Never call
+`time.time()` in engine code; take it from `self.clock()`.
+
+**Randomness inside a run is derived from the save.** `_roll()` hashes the run seed
+with `state.action_count`, both persisted, so crits and cascades replay
+identically. Do not introduce a `random.Random` instance into runtime code — it
+would make saves non-reproducible and `_roll` runs on every click.
+
+**The server is the only authority on the economy.** The client extrapolates
+amounts between polls purely for smooth numbers; every poll overwrites the guess
+and every mutating call returns fresh state. Do not move economy logic into JS.
+
+**Nothing touches the global RNG.** Every generation function takes an explicit
+`random.Random`. `tests.test_generator.test_generation_does_not_touch_global_rng`
+enforces this — it is what makes a seed reproducible in a process that has done
+other work.
+
+## How to change balance
+
+1. Edit `TUNING` in `generator.py`. Every balance number lives there.
+2. `python -m incgame simulate --seed N` on a few seeds to sanity-check.
+3. `python -m incgame balance --runs 400` and read the medians and failures.
+4. `python -m unittest tests.test_balance`.
+
+The current envelope, measured over 600 seeds at 20 simulated minutes:
+
+| | median |
+|---|---|
+| first generator | ~6s |
+| first upgrade | ~32s |
+| prestige available | ~3.9 min |
+| ascensions | 3 |
+| upgrade tree bought | ~39% |
+| healthy seeds | 521/600 (87%) |
+
+The 13% that fall out are pacing outliers, not soft-locks — `validate_game()` makes
+soft-locks impossible. Over 300 seeds the composition is: 7.7% buy their whole
+tree inside the window, 3.0% stall the autoplayer for five minutes, 2.7% ascend
+faster than once every two minutes. Tree exhaustion is the largest remaining gap
+and is fundamentally a content-volume problem, not a tuning one.
+
+`balance.py` reports **medians, not means**: one pathological seed must not hide
+behind an average, and finding pathological seeds is the entire point.
+
+The autoplayer is deliberately mediocre — it buys the cheapest thing that helps and
+converts only surplus. If a mediocre strategy reaches prestige in reasonable time,
+an attentive player certainly will; if a mediocre strategy stalls, the seed is
+badly generated regardless of what an expert could extract. Two autoplayer
+behaviours exist specifically to avoid false alarms, and both are load-bearing:
+`_reserve()` (a player saving for an upgrade stops spending) and
+`_should_prestige()` (a player resets when the run beats the last one, not the
+instant it is possible). Without them every seed reports as stalled or as a
+25-second treadmill, and the report becomes noise.
+
+## Bugs the harness found, and what they teach
+
+Each of these was invisible in whatever seed happened to be open, and each left a
+permanent check behind. When adding a generation rule, ask which of these shapes it
+could repeat.
+
+**Thresholds priced in the wrong units.** Upgrade gates scaled with the *upgrade's*
+tier but ignored the tier of the resource they were measured in, so a late gate
+demanded 9,720 of a resource that caps at 25 and trickles in at 0.0004/s. The
+upgrade hid forever and the run silently lost part of its tree. Fixed by
+`_resource_gate()` pricing gates in the same per-tier units as costs.
+*Lesson: any generated number compared against a resource must scale with that
+resource's tier.*
+
+**Dead content at the deep end.** `gen_rate_falloff` at 0.16 made a tier-4
+generator produce one unit per forty minutes. It existed, it was buyable, it did
+nothing. Now 0.22.
+*Lesson: check the extremes of every generated range, not the middle.*
+
+**A meta-loop that collapsed.** Permanent multipliers compound, so run score grows
+geometrically across ascensions while the `sqrt` in `prestige_points` only halves
+the exponent. Points kept climbing, the next reset stayed trivial, and one seed
+ascended 84 times in twenty minutes. A *linear* surcharge lost the same race; only
+geometric escalation (`prestige_escalation ** ascensions`) matches geometric
+output growth. The harness had no check for this, which is why it went unnoticed —
+`MIN_ASCENSION_SECONDS` exists now.
+*Lesson: when the harness misses a failure mode, adding the check matters more
+than the fix.*
+
+**Upgrades that made you worse.** `jitter` around a 1.2 base yields `[0.96, 1.44]`,
+so 3.6% of generated multipliers were below 1.0 — you could pay for a downgrade —
+and another 3.4% were under +5%, imperceptible. Fixed by `_gain()`, which floors
+every multiplier at `MIN_UPGRADE_GAIN`.
+*Lesson: `jitter` around a base near 1.0 crosses 1.0. An upgrade must never be a
+trap; the player assumes it and the autoplayer's cheapest-first buying relies on
+it.*
+
+**Effects aimed at content the player did not have.** A tier-0 upgrade offering
+"×1.5 storage for a tier-3 resource" is not wrong, but it is unreadable and unfelt
+as the *first thing a new run shows you*. `_target_for_tier()` prefers targets at
+or just below the upgrade's own depth. This made upgrades roughly 40% stronger in
+practice without changing a single multiplier, which is why `cost_unit_by_tier`
+was raised to compensate.
+*Lesson: an effect's target matters as much as its magnitude, and fixing wasted
+effects is a power buff that needs a cost pass.*
+
+## Invariants the generator must maintain
+
+`validate_game()` runs on every `generate_game()` and raises `InvalidGame` rather
+than returning a broken run. It checks: a tier-0 resource exists; a free ungated
+action exists (the run must be playable in the first frame); every resource has a
+producer; every cost and gate names real content; generator `cost_growth > 1`; the
+upgrade requirement graph points strictly backwards in tier; prestige is
+configured.
+
+Add a check here whenever you add a generation rule that could produce a
+soft-lock. `tests.test_generator.test_validator_rejects_a_broken_game` deliberately
+breaks a game to prove the validator is not vacuous — keep that honest.
+
+The property tests assert things true of *every* seed, never the output of a
+specific seed. Asserting that seed 42 produces "Essence" is asserting the output of
+a PRNG and breaks the moment anything improves.
+
+## Engine gotchas
+
+- **`OrbitState`-style duplication does not exist here, but zero-state does.**
+  `_reset_run()` is called both on first construction and on prestige, so a new
+  game and a post-prestige game take the same path. Keep it that way.
+- **`_credit()` is the only place `amounts` grows.** That is what makes lifetime
+  earnings, and therefore prestige value, impossible to double-count. Route new
+  income through it.
+- **Cascades are one level deep, on purpose.** Two generated actions pointing at
+  each other would otherwise be an unbounded loop.
+- **Reductions are floored** (`MIN_REDUCTION`) so stacking cooldown or cost
+  reductions can approach but never reach zero.
+- **Upkeep throttles, it does not stop.** A starved generator scales output down
+  proportionally. This is the main source of mid-run tension: overbuilding a
+  tier-2 farm quietly starves the tier-1 stock feeding it, and the fix is a
+  decision rather than a reload.
+- **Adding a field to `GameDef`** means updating `to_dict()` too, or the client
+  silently loses it. Use `dataclasses.replace()` to derive modified copies —
+  `GameDef` caches lookup dicts via `object.__setattr__`, so `**obj.__dict__`
+  splatting picks up the caches and fails.
+
+## Frontend gotchas
+
+- **`keyedList` in `ui.js` is the only place list children are added or removed.**
+  Re-rendering with `innerHTML` at the poll rate cancels in-progress taps, drops
+  `:active` feedback, and resets the upgrade list's scroll position several times a
+  second. Node identity is load-bearing.
+- **`fmt_number` exists twice**, in `model.py` and `format.js`, because the client
+  formats interpolated values the server never sent. `tests/test_format_parity.py`
+  shells out to `node` and compares both against the same table. If you change one,
+  change both.
+- **Colours come from the seed.** Resource colours, `--accent`, and `--hue` are set
+  from the generated theme at runtime. Do not hardcode a hue the generator owns.
+  The game is dark in both colour schemes on purpose: the palette picks lightness
+  in the 58–72% band for contrast against dark, and light mode would need a second
+  palette and a second contrast validation per seed.
+- **Mechanics are surfaced in plain language** in the Work tab. In a generated game
+  the player has no genre knowledge to fall back on — they cannot know a momentum
+  system exists until told — so an unexplained rule is indistinguishable from a
+  bug. Any new mechanic needs a generated one-sentence description and, where it
+  has live state, a readout in `view._mechanics`.
+- **Locked content is revealed at `TEASE_THRESHOLD`** (35% of its gate) with the
+  condition spelled out. A goal you can see is a goal; content that appears fully
+  formed is a non-event.
+
+## Known limits
+
+Honest about scope rather than aspirational:
+
+- **Content depth is finite.** Five upgrade tiers, one prestige layer. A long
+  session exhausts the tree and hits `max_level` on permanent upgrades. Deeper
+  meta-layers are not implemented, and with geometric prestige escalation a very
+  long save will eventually find ascensions impractical. This is the biggest
+  remaining gap: 7.7% of seeds are cleared out inside twenty minutes, and no amount
+  of `TUNING` fixes that — it needs more generated content per tier, or a sixth
+  tier, or a second prestige layer.
+- **Deep-chain seeds sit at the fast end.** 5–6 resource chains ascend around every
+  two minutes against a ~4 minute median, even after depth-scaled divisors and
+  escalation. Inside the playable band, but it is the widest remaining variance.
+- **~13% of seeds fall outside the pacing envelope.** None are unplayable. The
+  tests bound the proportion (`test_most_runs_do_not_exhaust_their_content` allows
+  up to 15%) rather than forbidding the tail, because a short seed is legitimate
+  variety and forbidding it would forbid the variation that is the product.
+- **The server is single-player, in-memory, unauthenticated.** Loopback by default.
+  Do not expose it. Sessions are lost on restart — the client's localStorage save is
+  the real persistence.
+- **No sound, no animation beyond CSS, no per-resource icons.**
+
+## Working agreements
+
+- Develop on `claude/claude-md-docs-e91w1b`; push with `git push -u origin <branch>`.
+  Do not push to `main`. Do not open a PR unless asked.
+- Run `python -m unittest discover -s tests` before committing. If you touched
+  generation, also run `python -m incgame balance --runs 200`.
+- Balance changes go in `TUNING` with a comment explaining *why* the number moved,
+  not just what it is. The existing comments in `TUNING` are the model to follow —
+  several record a specific failure the number prevents.
+- When you fix a generated-content bug, ask whether the harness would have caught
+  it. If not, add the check. That is worth more than the fix.

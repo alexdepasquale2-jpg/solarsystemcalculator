@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "incgame"
+version = "0.1.0"
+description = "A generative incremental game: every seed produces a different game — resources, actions, upgrades, and emergent mechanics all generated."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["game", "incremental", "idle", "procedural-generation", "emergent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+
+# Deliberately empty. The engine, the balance harness, and the HTTP server are all
+# standard library only, so `git clone && python -m incgame serve` works on a bare
+# Python install. Anything that would add a runtime dependency belongs behind an
+# optional extra instead.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "black>=23.0", "ruff>=0.1", "mypy>=1.0"]
+
+[project.scripts]
+incgame = "incgame.__main__:main"
+
+[tool.setuptools]
+packages = ["incgame"]
+
+[tool.setuptools.package-data]
+# The frontend ships with the package so an installed copy can still serve it.
+incgame = ["../frontend/**/*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+ignore = [
+    "E501", # line length is black's job
+    "B008", # function call in default arg: the injected clock default is intentional
+]
+
+[tool.mypy]
+python_version = "3.9"
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
