@@ -15,6 +15,41 @@ python -m incgame serve
 Python 3.9+. Nothing to install — the engine, the balance harness, and the HTTP
 server are standard library only.
 
+## Playing on your phone
+
+The game needs the Python server running somewhere your phone can reach. Two ways:
+
+**Same Wi-Fi as a computer** (easiest). On the computer:
+
+```bash
+python -m incgame serve --host 0.0.0.0
+```
+
+It prints the address to type into your phone:
+
+```
+incgame serving on http://127.0.0.1:8000/   (this machine)
+                    http://192.168.1.24:8000/   (phone, same Wi-Fi)
+```
+
+Open that second URL on the phone, then **Add to Home Screen** — the manifest makes
+it launch fullscreen with no browser chrome. Progress lives in the phone's
+`localStorage`, so it persists across restarts and credits up to eight hours of
+offline production when you come back.
+
+`--host 0.0.0.0` listens on every interface. There is no authentication and
+sessions are held in memory: fine on a home network, not on a café one.
+
+**Entirely on the phone, no computer.** Android: install
+[Termux](https://termux.dev), then `pkg install python git`, clone, and
+`python -m incgame serve`. Open `http://127.0.0.1:8000` in your phone's browser.
+iOS: [a-Shell](https://holzschu.github.io/a-Shell_iOS/) ships Python and works the
+same way.
+
+Note that the page is not playable offline — closing the server stops the game.
+The manifest makes it installable, but there is no service worker, and the server
+is the sole authority on the economy by design.
+
 ## What gets generated
 
 Every run generates:

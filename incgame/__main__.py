@@ -62,12 +62,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 0
 
 
+def _lan_address() -> Optional[str]:
+    """
+    Best guess at this machine's address on the local network.
+
+    Opens a UDP socket toward a public address and reads back which local
+    interface the kernel picked. No packet is actually sent, and it works without
+    DNS -- unlike `gethostbyname(gethostname())`, which returns 127.0.1.1 on most
+    Linux boxes and is therefore useless for exactly this purpose.
+    """
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("8.8.8.8", 80))
+        address = probe.getsockname()[0]
+        return None if address.startswith("127.") else address
+    except OSError:
+        return None
+    finally:
+        probe.close()
+
+
 def _serve(host: str, port: int, seed: Optional[int]) -> int:
     from .server import serve
 
     httpd, url = serve(host=host, port=port, seed=seed)
-    print(f"incgame serving on {url}")
-    print("Open that in a browser. Ctrl-C to stop.")
+    actual_port = httpd.server_address[1]
+
+    if host in {"0.0.0.0", "::"}:
+        # "http://0.0.0.0:8000" is not a URL anyone can type into a phone, so
+        # print the address the other devices on the network actually need.
+        lan = _lan_address()
+        print(f"incgame serving on http://127.0.0.1:{actual_port}/   (this machine)")
+        if lan:
+            print(f"                    http://{lan}:{actual_port}/   (phone, same Wi-Fi)")
+        else:
+            print("  could not determine this machine's LAN address; check `ip addr` / `ifconfig`")
+        print("\n  Listening on all interfaces. The game has no authentication and keeps")
+        print("  sessions in memory -- fine on a home network, not on a public one.")
+    else:
+        print(f"incgame serving on {url}")
+
+    print("\nOpen that in a browser. Ctrl-C to stop.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
