@@ -1,331 +1,542 @@
 # CLAUDE.md
 
-Guidance for AI assistants and developers working on the Creativity Engine.
+Guidance for building a fully generative, emergent incremental mobile game.
 
-## Project Overview
+## Project Vision
 
-**Creativity Engine** — an AI-powered system for generating, refining, and exploring creative ideas across multiple domains (writing, visual concepts, music composition, game design, etc.).
+**Generative Incremental Engine** — A procedurally generated incremental mobile game where **every session is unique**. Each play session generates:
 
-The engine combines:
-- **Prompt engineering** — carefully crafted system prompts and few-shot examples
-- **Multi-stage workflows** — idea generation → refinement → cross-pollination → evaluation
-- **Style and technique libraries** — creative constraints and methods (SCAMPER, lateral thinking, constraint-based generation)
-- **Output formatting** — structured exports (JSON, markdown, images, audio metadata)
+- Unique resource types, actions, and mechanics
+- Emergent gameplay from system interactions (not hand-coded)
+- Unique UI, narrative framing, progression paths
+- Unique upgrade trees, prestige mechanics, meta-progression
+- Unique names, descriptions, flavor text
 
-This is a **Python-first project** building toward a web interface. Start with the CLI and API, then wrap it in a UI.
+The game should feel like a different game every time you play, yet always follow the **incremental genre core**: accumulate resources, buy upgrades, reset for bonuses, repeat. Everything else emerges from the generated systems.
 
-## Core Principles
+## Architecture
 
-1. **Creativity over constraint** — The engine should surprise and delight, not limit thinking.
-2. **Iterative exploration** — Users should be able to refine, remix, and recombine outputs.
-3. **Domain-agnostic core** — The prompting and refinement logic should work across writing, visual, music, and other domains.
-4. **Reproducibility** — Seed control and version tracking so users can replicate and build on previous ideas.
-5. **Extensibility** — Easy to add new creative techniques, domains, and evaluation methods.
+**Backend (Python):**
+- Game engine and state management
+- Procedural generation (resources, mechanics, interactions)
+- Action resolution and tick processing
+- Save/load serialization
+- API for the frontend
 
-## Architecture (Planned)
+**Frontend (HTML5/JavaScript):**
+- Real-time UI rendering
+- Click handlers and input processing
+- Mobile-optimized layout
+- WebSocket or fetch communication with backend
+- Local caching of game state
+
+**Communication:**
+- REST API or WebSocket for real-time updates
+- Frontend sends actions (click, buy, prestige, etc.)
+- Backend returns new state, resources gained, notifications
+- Minimal latency (aim for <100ms round-trip on good connection)
 
 ```
-creativity_engine/
-  __init__.py              Public API surface
-  core/
-    generator.py           Main CreativityEngine class; orchestrates workflows
-    prompt_library.py      Domain-specific prompts and system messages
-    techniques.py          SCAMPER, lateral thinking, morphological analysis, etc.
-    refinement.py          Polish, expand, constraint-apply modules
-    evaluator.py           Quality scoring, coherence checks, novelty metrics
-  models/
-    base.py                Base classes for creative outputs
-    idea.py                Idea dataclass; metadata, generations, lineage
-    project.py             Project management; track related ideas
-  formats/
-    json_export.py         Serialize to JSON with full lineage
-    markdown_export.py     Human-readable markdown output
-    image_prompt.py        Generate image prompts for visual AI (DALL-E, Midjourney)
-    music_metadata.py      Compose music metadata for synthesis
-  integrations/
-    openai_client.py       GPT-4 and GPT-3.5 via OpenAI API
-    anthropic_client.py    Claude via Anthropic API (this session's model)
-    local_llm.py           Optional: Ollama, LLaMA, etc.
-  cli.py                   Command-line interface
-  server.py                FastAPI web server (future)
+backend/
+  game/
+    __init__.py
+    engine.py              Main GameEngine; tick loop, state management
+    generator.py           Procedural generation (resources, actions, upgrades)
+    emergence.py           Interaction systems; how mechanics affect each other
+    serializer.py          Save/load game state
+    world.py               World state; current resources, owned upgrades, etc.
+  resources/
+    base.py                Resource class; rate, caps, conversions
+    generator.py           Generate unique resource types
+  actions/
+    base.py                Action class; cost, reward, effects
+    generator.py           Generate unique action types
+  upgrades/
+    base.py                Upgrade class; effects on resources/actions
+    generator.py           Generate tech trees, prestige multipliers
+  mechanics/
+    base.py                Mechanic base class
+    synergy.py             Interactions between mechanics (emergence)
+    generator.py           Generate unique mechanical systems
+  api/
+    server.py              FastAPI or Flask web server
+    routes.py              /state, /action, /save, /prestige, etc.
+  config.py                Game tuning parameters (generation seeds, balance)
 
-tests/
-  unit/
-  integration/
+frontend/
+  index.html               Single-page app shell
+  css/
+    mobile.css             Mobile-first responsive design
+    generated.css          Dynamically injected styles (generated colors, themes)
+  js/
+    app.js                 Main app logic, state sync
+    ui.js                  Render and update UI
+    api.js                 API calls to backend
+    storage.js             LocalStorage caching
+  assets/
+    icons/                 (generated or placeholder)
+    sounds/                (optional sfx)
 ```
 
-## Development Workflows
+## Core Concepts
+
+### 1. Resource (Procedurally Generated)
+
+Every game generates 3–8 unique resource types. Each has:
+- **Name** (generated: "Essence," "Chronons," "Whimsy")
+- **Rate** (base production per tick: 0.1/s, 5/s, etc.)
+- **Cap** (max stored before overflow; can be increased by upgrades)
+- **Display format** (raw number, exponential, custom)
+- **Flavor** (description, icon color, associated mechanical theme)
+- **Decay** (optional: resource slowly decays, encouraging spending)
+- **Conversion** (optional: converts into other resources at a ratio)
+
+Example generated resource:
+```python
+Resource(
+    id="luminescence",
+    name="Luminescence",
+    rate=0.5,  # per second
+    cap=1000,
+    color="#FFD700",  # generated
+    description="A shimmering essence that fuels reality.",
+    conversions={"ethereal_charge": 0.1}  # 1 luminescence → 0.1 ethereal charge
+)
+```
+
+### 2. Action (Procedurally Generated)
+
+Actions are things the player can do repeatedly (or hold down). Examples:
+- "Click the Void" (generates resource A)
+- "Commune with the Zeitgeist" (generates resource B, costs resource A)
+- "Resonate" (passive; generates if you own upgrade X)
+
+Each action has:
+- **Name** (generated)
+- **Cost** (0 or more resource types)
+- **Reward** (generates 0 or more resources)
+- **Cooldown** (optional; can only be used once per N seconds)
+- **Scaling** (reward grows with upgrades or owned count)
+- **Flavor** (description, animation cue)
+
+```python
+Action(
+    id="commune_zeitgeist",
+    name="Commune with the Zeitgeist",
+    cost={"luminescence": 10},
+    reward={"temporal_echo": 5},
+    cooldown=0.5,  # 500ms between clicks
+    description="Bridge the gap between moments.",
+)
+```
+
+### 3. Upgrade (Procedurally Generated)
+
+Upgrades modify the game. They appear in a tech tree and can have prerequisites. Examples:
+- "+10% Luminescence production"
+- "Unlock new action: Transcend"
+- "Luminescence no longer decays"
+- "Every 5 clicks, double your next reward"
+
+Each upgrade has:
+- **Name** (generated)
+- **Cost** (resources or prestige currency)
+- **Effect** (a function or rule that modifies game state)
+- **Prerequisite** (which other upgrades must be bought first)
+- **Tier** (early/mid/late game)
+- **Flavor** (description)
+
+```python
+Upgrade(
+    id="luminescence_production_v1",
+    name="Resonant Amplification",
+    cost={"temporal_echo": 50},
+    effect=UpgradeEffect(
+        type="multiply_resource_rate",
+        resource="luminescence",
+        multiplier=1.1
+    ),
+    prerequisite=None,
+    tier="early",
+    description="Attune to the underlying harmonics.",
+)
+```
+
+### 4. Prestige (Meta-progression)
+
+When the player can no longer progress, they prestige:
+- Reset all resources to 0
+- Reset all non-prestige upgrades
+- Gain prestige currency based on total resources ever earned
+- Prestige currency buys permanent multipliers that persist across runs
+
+This is the **meta-game loop**. Each prestige run should feel different because new upgrades become available and new mechanics emerge.
+
+## Procedural Generation Strategy
+
+### Seeding
+
+Every game session has a **seed** (can be user-provided or random). All generation is deterministic from the seed:
+```python
+def generate_game(seed: int) -> Game:
+    rng = random.Random(seed)
+    resources = generate_resources(rng)
+    actions = generate_actions(rng, resources)
+    upgrades = generate_upgrades(rng, actions, resources)
+    mechanics = generate_mechanics(rng, resources, actions, upgrades)
+    return Game(resources, actions, upgrades, mechanics, seed=seed)
+```
+
+### Generation Phases
+
+**Phase 1: Base Resources (3–8 types)**
+- Pick names from a word pool (nouns, adjectives, suffixes)
+- Assign base rates (0.1–10 per second)
+- Assign caps (1000–100,000)
+- Assign colors and themes
+
+**Phase 2: Base Actions (5–12 types)**
+- Some cost resources, some are passive
+- Costs and rewards vary; ensure some feedback loops (action A generates resource B, which fuels action C)
+- Mix of high-reward-high-cost and low-reward-no-cost
+
+**Phase 3: Upgrades (30–60 types, in tiers)**
+- Early game: unlock actions, basic multipliers
+- Mid game: resource caps, new mechanics, conversion options
+- Late game: exponential multipliers, prestige mechanics
+
+**Phase 4: Mechanics (3–5 emergent systems)**
+- **Synergy:** "If you own 5+ upgrades from the X tree, gains from Y increase"
+- **Cascades:** "Whenever you click action A, there's a 5% chance to trigger action B"
+- **Scarcity:** Some resources decay; encourages spending
+- **Gating:** Certain upgrades become available only after you hit a resource threshold
+- **Feedback loops:** Action A generates resource B, resource B unlocks upgrades that boost action A
+
+### Emergence Through Interaction
+
+The magic happens when systems interact. Don't hard-code synergies; let them emerge:
+
+```python
+# Example: Emergent synergy
+# If the generation picks:
+# - Resource A with decay
+# - Action X that converts A → B
+# - Upgrade "Halt Decay" for A
+# Then emergent strategy: buy "Halt Decay" to prevent loss, build up A, then mass-convert to B
+```
+
+Emergence is achieved by:
+1. **Asymmetric resources** — Different rates, caps, conversions
+2. **Scaling** — Upgrades apply multipliers to action rewards or resource rates
+3. **Gating** — Unlocking new actions as you reach thresholds
+4. **Feedback loops** — Earlier actions feed into later ones
+5. **Randomized costs and rewards** — Creates unique trade-offs each run
+
+## Game Loop
+
+### Backend Tick Loop
+
+```python
+class GameEngine:
+    def __init__(self, game_state):
+        self.state = game_state
+        self.last_tick = time.time()
+    
+    def tick(self):
+        """Called ~10x per second; process passive generation."""
+        now = time.time()
+        dt = now - self.last_tick
+        self.last_tick = now
+        
+        # Update passive actions (they generate automatically)
+        for action in self.state.actions:
+            if action.is_passive:
+                reward = action.calculate_reward(self.state) * dt
+                self.state.add_resource(action.reward_resource, reward)
+        
+        # Apply decay
+        for resource in self.state.resources:
+            if resource.decay > 0:
+                self.state.resources[resource.id] *= (1 - resource.decay * dt)
+        
+        # Check for gated upgrades becoming available
+        for upgrade in self.state.upgrades:
+            if not upgrade.unlocked and self._check_gate(upgrade):
+                upgrade.unlocked = True
+        
+        return self.state
+    
+    def player_action(self, action_id: str):
+        """Player clicks or activates an action."""
+        action = self.state.actions[action_id]
+        if action.can_use(self.state):
+            self.state.spend_resources(action.cost)
+            reward = action.calculate_reward(self.state)
+            self.state.add_resource(action.reward_resource, reward)
+            return {"success": True, "reward": reward}
+        else:
+            return {"success": False, "reason": "Cannot afford"}
+    
+    def buy_upgrade(self, upgrade_id: str):
+        """Player buys an upgrade."""
+        upgrade = self.state.upgrades[upgrade_id]
+        if upgrade.can_buy(self.state):
+            self.state.spend_resources(upgrade.cost)
+            upgrade.apply(self.state)
+            return {"success": True}
+        else:
+            return {"success": False, "reason": "Cannot afford"}
+    
+    def prestige(self):
+        """Player resets and enters prestige mode."""
+        prestige_points = calculate_prestige_reward(self.state)
+        self.state.prestige_currency += prestige_points
+        self.state.reset()
+        return {"prestige_earned": prestige_points}
+```
+
+### Frontend Communication
+
+```javascript
+// app.js
+class GameClient {
+    async initialize() {
+        const response = await fetch('/api/new-game');
+        this.state = await response.json();
+        this.render();
+    }
+    
+    async playerAction(actionId) {
+        const response = await fetch('/api/action', {
+            method: 'POST',
+            body: JSON.stringify({ action_id: actionId })
+        });
+        const result = await response.json();
+        if (result.success) {
+            this.state = result.state;
+            this.showNotification(`+${result.reward.toFixed(1)} resources`);
+            this.render();
+        }
+    }
+    
+    async buyUpgrade(upgradeId) {
+        const response = await fetch('/api/buy-upgrade', {
+            method: 'POST',
+            body: JSON.stringify({ upgrade_id: upgradeId })
+        });
+        const result = await response.json();
+        if (result.success) {
+            this.state = result.state;
+            this.render();
+        }
+    }
+    
+    async prestige() {
+        const response = await fetch('/api/prestige', { method: 'POST' });
+        const result = await response.json();
+        this.state = result.state;
+        this.render();
+    }
+    
+    render() {
+        // Update UI from this.state
+        // Dynamically render resources, actions, upgrades based on generated names
+    }
+    
+    tick() {
+        // Request updated state every 100ms or so
+        this.playerAction('passive-tick');
+    }
+}
+```
+
+## Key Design Constraints
+
+### Balance
+
+- **Early game:** Should be fun immediately. Clicking should give quick feedback.
+- **Mid game:** Progression slows; upgrades become essential. Strategy emerges.
+- **Late game:** Exponential scaling; players prepare for prestige.
+- **Prestige:** Reset feels like progress (multiplier upgrades make the next run faster).
+
+To ensure balance in a generative game:
+1. **Resource sinks** — Ensure players have reasons to spend resources
+2. **Pacing** — Time between meaningful upgrades should be 30 seconds to 5 minutes
+3. **Thresholds** — Milestone rewards (reach 1M resources, buy 10 upgrades, etc.)
+4. **Soft caps** — Decay, cooldowns, caps that make progress non-linear
+
+### Mobile-First
+
+- **Touch targets:** Buttons ≥48px
+- **No scroll requirement:** All critical UI visible without scrolling
+- **Minimal bandwidth:** Fetch only deltas, not full state
+- **Offline-friendly:** Game continues ticking in localStorage while closed
+- **No ads:** Pure gameplay focus
+
+### Emergent, Not Random
+
+**Bad:** Randomly assign resource names and hope they make sense.
+**Good:** Generate interconnected systems where player choices matter and strategies arise naturally.
+
+Example of emergence:
+- Resource A has no passive generation
+- Action X converts A → B
+- Upgrade "A Production" unlocks if you own 3 B-related upgrades
+- Player discovers: "I need to mass-convert A to B, then use B to unlock A production"
+
+## Development Workflow
 
 ### Setup
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+source .venv/bin/activate
 pip install -e .
-pip install -e ".[dev]"    # pytest, black, ruff, mypy, ipython
+pip install -e ".[dev]"  # pytest, black, ruff, mypy
+
+cd frontend
+npm install
+npm run dev
 ```
 
-### Run locally
+### Running
 
 ```bash
-# CLI
-python -m creativity_engine --help
-python -m creativity_engine generate --prompt "A time-traveling baker" --technique scamper
+# Terminal 1: Backend
+python -m incremental_engine serve --port 5000
 
-# Python API
-from creativity_engine import CreativityEngine
-engine = CreativityEngine(model="gpt-4")
-ideas = engine.generate(prompt="...", technique="lateral_thinking", count=5)
+# Terminal 2: Frontend dev server
+cd frontend && npm run dev
+
+# Visit http://localhost:3000
 ```
 
-### Testing
+### Testing Generative Systems
 
 ```bash
-pytest -v
-pytest tests/unit/test_generator.py
-pytest --cov=creativity_engine
+# Test that generation is deterministic
+python -m incremental_engine generate-game --seed 42 > game1.json
+python -m incremental_engine generate-game --seed 42 > game2.json
+diff game1.json game2.json  # Should be identical
+
+# Test balance across multiple generated games
+python scripts/test_generation.py --runs 100 --log results.csv
+# Analyze: prestige timing, progression curves, resource flows
 ```
 
-### Code quality
+### Code Quality
 
 ```bash
 black .
 ruff check . --fix
-mypy creativity_engine
+mypy backend/
+pytest tests/ --cov=backend
 ```
 
-## Key Concepts
+## Testing Generative Systems
 
-### Idea (dataclass)
+**Unit tests:**
+- Resource generation produces valid resources
+- Actions can be executed (cost checking, reward calculation)
+- Upgrades apply effects correctly
+- Prestige math is correct
 
-Every output is an `Idea`:
+**Integration tests:**
+- Full game loop: generate → tick → player action → state update
+- Multiple prestige runs; state persists correctly
+- Emergence detection: verify that generated systems have interesting interactions
+
+**Generative tests:**
+- Seed reproducibility (same seed → same game)
+- Balance analysis across 100+ generated games (prestige point curves, upgrade counts, resource flow graphs)
+- Emergence metrics (how many upgrade combinations exist? how many are useful?)
+
+Example balance test:
 ```python
-@dataclass
-class Idea:
-    id: str                    # UUID
-    prompt: str                # Original user prompt
-    technique: str             # e.g., "scamper", "constraint_based"
-    domain: str                # e.g., "writing", "visual", "music"
-    generations: List[str]     # The actual creative outputs
-    metadata: Dict[str, Any]   # Model, temperature, seed, etc.
-    parent_id: Optional[str]   # If refined from another idea
-    created_at: datetime
-    version: int               # Track refinements
+def test_balance_across_seeds():
+    for seed in range(1, 101):
+        game = generate_game(seed)
+        
+        # Simulate ~5 min of play
+        state = simulate_game(game, ticks=30000)
+        
+        # Check: player should have unlocked 5–15 upgrades, not stuck
+        assert 5 <= len(state.bought_upgrades) <= 15
+        
+        # Check: prestige shouldn't be instant or impossible
+        prestige_points = calculate_prestige(state)
+        assert 10 <= prestige_points <= 1000000
+    
+    print("All 100 seeds balanced ✓")
 ```
 
-**Important:** Every idea must be reproducible. Store the random seed, model version,
-temperature, and exact prompt. This is the lineage.
+## Saving & Loading
 
-### CreativityEngine (main class)
+Save format: JSON with full game state.
 
-```python
-class CreativityEngine:
-    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
-        # model: "gpt-4", "gpt-3.5-turbo", "claude-opus", "local"
-        pass
-    
-    def generate(self, prompt: str, technique: str = "random", 
-                 domain: str = "writing", count: int = 3, 
-                 temperature: float = 0.9, seed: int = None) -> List[Idea]:
-        # High-level: call the right prompt, parse outputs, return Ideas
-        pass
-    
-    def refine(self, idea: Idea, direction: str = "expand") -> Idea:
-        # Expand, polish, constrain, remix
-        pass
-    
-    def cross_pollinate(self, ideas: List[Idea]) -> Idea:
-        # Combine ideas into something new
-        pass
-    
-    def evaluate(self, idea: Idea) -> Dict[str, float]:
-        # Novelty, coherence, feasibility scores
-        pass
-```
-
-### Technique Library
-
-- **SCAMPER** — Substitute, Combine, Adapt, Modify, Put to another use, Eliminate, Reverse
-- **Random Word** — Force association with a random word
-- **Constraint-based** — Generate under explicit constraints (no nouns, must rhyme, etc.)
-- **Morphological** — Decompose into dimensions, recombine
-- **Lateral Thinking** — Six thinking hats, provocation, random entry
-- **Mashup** — Combine two unrelated domains
-- **Worst Possible Idea** — Invert and find value in the opposite
-
-Each technique is a function or class that:
-1. Takes a prompt and constraint dict
-2. Builds a specialized system message
-3. Calls the LLM
-4. Parses and structures the output
-5. Returns one or more `Idea` objects
-
-### Domain-Specific Behavior
-
-- **Writing** — Genres (flash fiction, poetry, screenplay, etc.), style, tone
-- **Visual** — Description → image-prompt (DALL-E/Midjourney format)
-- **Music** — Key, tempo, instrumentation, mood metadata → music software input
-- **Game Design** — Mechanics, setting, target audience
-
-Store domain handlers as separate modules in `formats/` or as strategy objects inside `Idea`.
-
-## Code Conventions
-
-**Naming:**
-- Public API: simple, verb-forward (`generate()`, `refine()`, `evaluate()`)
-- Private/internal: `_helper()` prefix
-- Constants: `UPPER_SNAKE` for module-level, `ClassName.CONSTANT` for class-level
-
-**Type hints:**
-- All public signatures must have type hints
-- Use `Optional[X]` for nullable, `List[X]` / `Dict[K, V]` for collections
-- Return types always explicit
-
-**Docstrings:**
-- Google style (Parameters, Returns, Raises)
-- One-liner for module docstring at top
-- Multi-line for classes and functions
-
-**Error handling:**
-- `CreativityEngineError` base exception
-- `ModelError` — LLM call failed
-- `PromptError` — Invalid or missing prompt
-- `TechniqueError` — Unknown technique
-- `DomainError` — Unsupported domain
-
-Always catch and re-raise with context; do not swallow exceptions silently.
-
-**Testing:**
-- Unit tests in `tests/unit/`; integration tests in `tests/integration/`
-- Mock LLM calls (don't hit the API in unit tests)
-- Test reproducibility: same seed → same output
-- Parametrize over techniques and domains
-
-## Reproducibility & Seeding
-
-**The entire engine must be reproducible.** If a user runs:
-```bash
-python -m creativity_engine generate --prompt "..." --seed 42
-```
-
-They must get **identical** outputs every time. This means:
-
-1. Store `seed` in `Idea.metadata`
-2. Pass `seed` to the LLM (OpenAI supports `seed` on newer models; Claude does not)
-3. If the LLM does not support seeding, document this and note the limitation
-4. Use Python's `random` module for non-LLM randomness (shuffling, selecting techniques) and seed it
-5. Never rely on floating-point dict ordering or other non-deterministic behavior
-
-Example:
-```python
-def generate(self, ..., seed: int = None):
-    if seed is not None:
-        random.seed(seed)
-        # Also pass to LLM if supported
-    # ... continue
-```
-
-## LLM Integration
-
-### Supported Models
-
-- **OpenAI** — GPT-4, GPT-3.5-turbo (via `openai` package)
-- **Anthropic** — Claude (via `anthropic` package)
-- **Local** — Ollama/LLaMA (via `ollama` package, optional)
-
-Each has its own client file in `integrations/`.
-
-### API Keys
-
-Expect `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` in environment. Do **not** hardcode.
-
-### Prompt Templates
-
-Store all system prompts and few-shot examples in `prompt_library.py`, organized by domain and technique:
-```python
-PROMPTS = {
-    "writing": {
-        "scamper": "You are a creative writing assistant...",
-        "lateral_thinking": "Explore unconventional ideas...",
-    },
-    "visual": {
-        "scamper": "You generate visual design concepts...",
-    }
+```json
+{
+  "seed": 12345,
+  "timestamp": "2025-01-15T10:30:00Z",
+  "resources": {
+    "luminescence": 5000.5,
+    "temporal_echo": 150
+  },
+  "bought_upgrades": [
+    "luminescence_production_v1",
+    "unlock_commune_zeitgeist"
+  ],
+  "prestige_currency": 42,
+  "total_earned": 50000,
+  "playtime_seconds": 600
 }
 ```
 
-Make prompts **discoverable**: add a CLI command to list and inspect them:
-```bash
-python -m creativity_engine list-prompts
-python -m creativity_engine show-prompt writing/scamper
-```
+On load: regenerate the game structure from seed, apply all bought upgrades, restore resource counts.
 
-## File Organization Rules
+## Distribution
 
-- **One class per file**, named `class_name.py` (e.g., `idea.py` contains `Idea`, `generator.py` contains `CreativityEngine`)
-- **Exception classes** in a shared `errors.py`
-- **Configuration** (API endpoints, defaults) in `config.py`
-- **CLI entry point** is `cli.py`; server entry point is `server.py`
-- **No circular imports** — if `module_a` imports `module_b`, `module_b` must not import `module_a`
+**Web:**
+- Host frontend as static files (Netlify, GitHub Pages)
+- Run backend on a cheap cloud server (Railway, Fly.io, Heroku)
+- Or: backend in WASM (Pyodide) so everything runs in browser
 
-## Testing Expectations
+**Mobile (web app):**
+- Add `manifest.json` for PWA install
+- Support offline (service worker, localStorage sync)
 
-Before any feature ships:
-
-1. Unit test the core logic (techniques, prompt building, idea validation)
-2. Integration test the full workflow (generate → refine → evaluate)
-3. Mock all LLM calls in unit/integration tests (use `responses` library or `unittest.mock`)
-4. Test both happy path and error cases
-5. Run `pytest --cov` and aim for ≥80% coverage on core modules
-
-Example test structure:
-```python
-# tests/unit/test_generator.py
-from unittest.mock import patch, MagicMock
-from creativity_engine import CreativityEngine
-
-def test_generate_with_seed_is_reproducible():
-    with patch('creativity_engine.integrations.openai_client.OpenAIClient.call') as mock_call:
-        mock_call.return_value = "Generated idea #1"
-        
-        engine = CreativityEngine(model="gpt-4")
-        idea1 = engine.generate(prompt="Test", seed=42)[0]
-        idea2 = engine.generate(prompt="Test", seed=42)[0]
-        
-        assert idea1.generations == idea2.generations
-```
-
-## Documentation
-
-- **README.md** — Quick start, installation, one example
-- **TECHNIQUES.md** — Detailed guide to each creative technique
-- **API.md** — Full API reference (generated from docstrings if using Sphinx)
-- **Examples/** — Jupyter notebooks or Python scripts showing workflows
-
-Keep documentation **in sync with code**. If you add a technique or method, update the docs immediately.
-
-## Deployment & Distribution
-
-- **PyPI** — Publish `creativity_engine` as an installable package
-- **Web server** — FastAPI wrapper in `server.py` (future)
-- **CLI** — Fully functional via `python -m creativity_engine`
-
-Version in `pyproject.toml` is the source of truth. Tag releases as `vX.Y.Z` in git.
+**Desktop (future):**
+- Tauri or Electron wrapper around HTML5 frontend
 
 ## Working Agreements
 
-1. **Branch naming** — Feature branches are `feature/short-description`, bug fixes are `fix/issue-name`, documentation is `docs/topic`.
-2. **Commit messages** — Imperative mood, first line ≤60 chars, wrap body at 72 chars. Reference issues.
-3. **Code review** — All non-trivial PRs require review before merging.
-4. **Do not** commit API keys, `.env` files, or model binaries.
-5. **Do** add a `.gitignore` for `__pycache__/`, `*.pyc`, `.venv/`, `dist/`, `build/`, `.egg-info/`, and `.env`.
+1. **Generation is law.** If it's possible to generate, don't hard-code it.
+2. **Test every seed.** Generative systems must be tested across dozens of seeds, not just default.
+3. **Emergence over hand-craft.** Let mechanics interact naturally; don't force every synergy.
+4. **Mobile first.** Every UI decision should consider <5" screens and touch.
+5. **Balance with data.** Run generative tests frequently; tweak generation parameters, not individual games.
+6. **Seed preservation.** Always save and display the seed. Reproducibility is a feature.
+
+## Success Metrics
+
+A successful run feels like:
+- ✓ New aesthetic and names every game
+- ✓ Surprising strategy emerges (not obvious what to do)
+- ✓ Clear prestige point; player knows when to reset
+- ✓ Prestige multipliers make the next run feel different
+- ✓ 5–30 minute play loop is satisfying
+- ✓ Mobile layout is responsive and fun to play
 
 ## Next Steps
 
-1. Set up `pyproject.toml` with dependencies (requests, openai, anthropic, fastapi, pydantic)
-2. Build `core/generator.py` with a skeleton `CreativityEngine` class
-3. Implement one technique (e.g., SCAMPER) end-to-end
-4. Write tests
-5. Iterate
+1. Build the generator framework (`Generator` class with seeded RNG)
+2. Implement resource, action, upgrade generation
+3. Build the game engine tick loop and state management
+4. Create a minimal frontend (hardcoded resources/actions first)
+5. Test balance across 50+ seeds
+6. Add prestige mechanics
+7. Iterate on emergence and fun factor
+8. Polish mobile UI
+9. Ship it
 
-The bar for "done" is: a user can run `python -m creativity_engine generate --prompt "..."` and get back a novel, coherent creative output. Everything else is refinement.
+Start with a working, boring game (hand-coded resources/actions). Once the engine is solid, plug in the generator and watch it emerge.
