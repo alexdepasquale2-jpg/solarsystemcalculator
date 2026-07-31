@@ -1,0 +1,2218 @@
+<title>Incremental — a different game every seed</title>
+
+<!--
+  Standalone build.
+
+  The same game as `python -m incgame serve`, with the generator and engine ported
+  to run in the browser so it works from a URL with no server. See web/README.md
+  for what that duplication costs and why it exists.
+
+  The visual system is the one in frontend/css/style.css: palette derived from the
+  seed at runtime, deliberately dark in both colour schemes (the generated palette
+  picks lightness in the 58-72% band for contrast against dark, and a light ground
+  would need a second palette and a second contrast pass per seed), mobile-first,
+  tabular numerals everywhere digits line up.
+-->
+
+<style>
+:root {
+  /* Set per run by applyTheme() from the generated palette. */
+  --accent: #7cc4ff;
+  --secondary: #ffb27c;
+  --hue: 210;
+
+  /* Neutrals are blue-biased rather than pure grey, so the ground sits under the
+     generated accents instead of fighting them. */
+  --bg: #0b0e14;
+  --bg-raised: #141924;
+  --bg-card: #171d29;
+  --bg-card-hi: #1e2534;
+  --line: #263041;
+  --text: #e8edf7;
+  --text-dim: #8b97ad;
+  --text-faint: #5b667a;
+  --good: #62d29a;
+  --bad: #ff7a7a;
+
+  --radius: 14px;
+  --tap: 48px;
+  --pad: 14px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+
+  color-scheme: dark;
+}
+
+/* The game commits to one visual world. This is a choice, not an omission: the
+   per-seed palette is generated for a dark ground. */
+@media (prefers-color-scheme: light) { :root { color-scheme: dark; } }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  background-image: radial-gradient(120% 60% at 50% 0%, hsl(var(--hue) 45% 14%) 0%, var(--bg) 62%);
+  background-attachment: fixed;
+  color: var(--text);
+  font: 15px/1.45 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  padding-bottom: calc(var(--tap) + 26px + var(--safe-b));
+  min-height: 100vh;
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* -- top bar ------------------------------------------------------------- */
+
+.topbar { display: flex; align-items: flex-start; gap: 10px; padding: calc(var(--safe-t) + 12px) var(--pad) 8px; }
+.topbar-main { flex: 1; min-width: 0; }
+.topbar h1 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.01em; text-wrap: balance; }
+.flavor {
+  margin: 3px 0 0; font-size: 12.5px; color: var(--text-faint);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.icon-btn {
+  flex: 0 0 auto; width: 40px; height: 40px;
+  border: 1px solid var(--line); border-radius: 11px;
+  background: var(--bg-raised); color: var(--text-dim);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.icon-btn:active { background: var(--bg-card-hi); }
+
+/* -- resource rail ------------------------------------------------------- */
+
+.resources {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; gap: 8px; padding: 8px var(--pad) 10px;
+  overflow-x: auto; scrollbar-width: none;
+  background: linear-gradient(var(--bg) 65%, transparent);
+  backdrop-filter: blur(8px);
+}
+.resources::-webkit-scrollbar { display: none; }
+.res {
+  flex: 0 0 auto; min-width: 108px; padding: 8px 11px 9px;
+  border: 1px solid var(--line); border-left: 3px solid var(--res, var(--accent));
+  border-radius: 11px; background: var(--bg-raised);
+}
+.res-name {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-faint); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 140px;
+}
+.res-amount { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 640; color: var(--res, var(--text)); line-height: 1.2; }
+.res-rate { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.res-rate.is-negative { color: var(--bad); }
+.res-bar { margin-top: 5px; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.res-bar > i { display: block; height: 100%; width: 0; background: var(--res, var(--accent)); transition: width .25s linear; }
+.res.is-full .res-bar > i { background: var(--bad); }
+
+/* -- panels -------------------------------------------------------------- */
+
+main { padding: 4px var(--pad) 0; }
+.panel[hidden] { display: none; }
+.section-head { display: flex; justify-content: space-between; align-items: baseline; margin: 16px 2px 8px; }
+.section-head h2 {
+  margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+.empty {
+  padding: 22px 14px; border: 1px dashed var(--line); border-radius: var(--radius);
+  color: var(--text-faint); font-size: 13px; text-align: center;
+}
+
+/* -- actions ------------------------------------------------------------- */
+
+.actions { display: grid; gap: 10px; }
+@media (min-width: 520px) { .actions { grid-template-columns: 1fr 1fr; } }
+
+.action {
+  position: relative; display: block; width: 100%; min-height: 68px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-card); color: var(--text); text-align: left;
+  cursor: pointer; overflow: hidden; font: inherit;
+}
+.action:active:not(:disabled) { transform: scale(.985); background: var(--bg-card-hi); }
+.action:disabled { opacity: .5; cursor: default; }
+.action.is-primary {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, var(--bg-card)), var(--bg-card));
+}
+.action-name { font-weight: 620; font-size: 15px; }
+.action-desc { margin-top: 1px; font-size: 12px; color: var(--text-faint); }
+.action-flow { margin-top: 7px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+.action-arrow { color: var(--text-faint); }
+.action-cool { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--accent); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px;
+  border-radius: 999px; background: var(--bg-raised); border: 1px solid var(--line);
+  font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.chip.is-short { border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); color: var(--bad); }
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--res, var(--accent)); flex: 0 0 auto; }
+
+/* -- locked -------------------------------------------------------------- */
+
+.locked { border-style: dashed; background: transparent; }
+.locked .action-name, .locked .card-name { color: var(--text-faint); }
+.lock-gate { margin-top: 6px; font-size: 12px; color: var(--text-faint); }
+.lock-bar { margin-top: 6px; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.lock-bar > i { display: block; height: 100%; background: var(--text-faint); transition: width .3s ease; }
+
+/* -- cards --------------------------------------------------------------- */
+
+.cards { display: grid; gap: 10px; }
+@media (min-width: 620px) { .cards { grid-template-columns: 1fr 1fr; } }
+
+.card { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-card); }
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.card-name { font-weight: 620; font-size: 14.5px; }
+.card-sub { margin-top: 1px; font-size: 12px; color: var(--text-faint); }
+.card-owned {
+  flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 13px;
+  color: var(--text-dim); padding: 2px 8px; border-radius: 999px; background: var(--bg-raised);
+}
+.card-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.card-buy { display: flex; gap: 8px; margin-top: 10px; }
+.card.is-owned { opacity: .55; }
+.card.is-throttled { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.throttle { margin-top: 7px; font-size: 12px; color: var(--bad); }
+.effect { margin-top: 7px; font-size: 12.5px; color: var(--accent); }
+.family { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
+
+.btn {
+  min-height: var(--tap); padding: 0 16px; border: 1px solid var(--line);
+  border-radius: 11px; background: var(--bg-raised); color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.btn:active:not(:disabled) { background: var(--bg-card-hi); transform: scale(.985); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn-primary {
+  flex: 1;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+}
+.btn-max { flex: 0 0 auto; min-width: 74px; }
+.btn-wide { width: 100%; margin-top: 14px; }
+.btn-danger {
+  border-color: color-mix(in srgb, var(--secondary) 55%, var(--line));
+  background: color-mix(in srgb, var(--secondary) 16%, var(--bg-raised));
+}
+
+/* -- mechanics ----------------------------------------------------------- */
+
+.mechanics { display: grid; gap: 8px; }
+.mech {
+  padding: 10px 13px; border: 1px solid var(--line);
+  border-left: 3px solid var(--secondary); border-radius: 11px; background: var(--bg-raised);
+}
+.mech-kind { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint); }
+.mech-name { font-size: 13px; font-weight: 620; }
+.mech-desc { margin-top: 3px; font-size: 12.5px; color: var(--text-dim); }
+.mech-live { margin-top: 5px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--secondary); }
+
+/* -- prestige ------------------------------------------------------------ */
+
+.prestige-head {
+  padding: 16px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--secondary) 14%, var(--bg-card)), var(--bg-card));
+  margin-bottom: 4px;
+}
+.prestige-head h2 { margin: 0 0 2px; font-size: 17px; }
+.prestige-head .hint { color: var(--text-dim); font-size: 13px; margin: 0 0 12px; }
+.prestige-nums { display: flex; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
+.prestige-num .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-faint); }
+.prestige-num .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--secondary); }
+
+/* -- tab bar ------------------------------------------------------------- */
+
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+  padding: 5px 6px calc(5px + var(--safe-b));
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border-top: 1px solid var(--line); backdrop-filter: blur(12px);
+}
+.tab {
+  position: relative; min-height: var(--tap); border: 0; border-radius: 11px;
+  background: transparent; color: var(--text-faint);
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.tab.is-active { background: var(--bg-raised); color: var(--accent); }
+.tab .badge {
+  position: absolute; top: 8px; right: 50%; margin-right: -34px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+}
+
+/* -- toasts -------------------------------------------------------------- */
+
+.toasts {
+  position: fixed; left: 0; right: 0; bottom: calc(var(--tap) + 18px + var(--safe-b));
+  z-index: 40; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  pointer-events: none; padding: 0 var(--pad);
+}
+.toast {
+  max-width: 100%; padding: 7px 13px; border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-card-hi) 96%, transparent);
+  border: 1px solid var(--line); font-size: 13px; font-variant-numeric: tabular-nums;
+  animation: toast-in .18s ease, toast-out .3s ease 1.1s forwards;
+}
+.toast.is-crit { border-color: var(--secondary); color: var(--secondary); font-weight: 650; }
+.toast.is-good { border-color: color-mix(in srgb, var(--good) 60%, var(--line)); }
+.toast.is-bad { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); color: var(--bad); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-6px); } }
+
+/* -- menu ---------------------------------------------------------------- */
+
+.menu {
+  width: min(440px, calc(100vw - 28px)); padding: 18px;
+  border: 1px solid var(--line); border-radius: 18px;
+  background: var(--bg-raised); color: var(--text);
+}
+.menu::backdrop { background: rgb(0 0 0 / .6); }
+.menu h2 { margin: 16px 0 6px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); }
+.menu h2:first-child { margin-top: 0; }
+.menu-seed { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); }
+.menu-seed code { font-size: 14px; color: var(--accent); background: var(--bg-card); padding: 2px 7px; border-radius: 6px; }
+.menu-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-size: 13px; margin-bottom: 4px; }
+.menu-stats div { display: flex; justify-content: space-between; gap: 8px; }
+.menu-stats span { color: var(--text-faint); }
+.menu-stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.menu-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.menu-actions .btn { flex: 1; min-width: 116px; }
+.input {
+  flex: 1; min-width: 120px; min-height: var(--tap); padding: 0 13px;
+  border: 1px solid var(--line); border-radius: 11px;
+  background: var(--bg-card); color: var(--text); font: inherit; font-size: 15px;
+}
+.hint { font-size: 12.5px; color: var(--text-faint); margin: 0 0 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  .action:active:not(:disabled), .btn:active:not(:disabled) { transform: none; }
+}
+</style>
+
+<header class="topbar">
+  <div class="topbar-main">
+    <h1 id="run-title">…</h1>
+    <p id="run-flavor" class="flavor"></p>
+  </div>
+  <button id="btn-menu" class="icon-btn" aria-label="Menu">≡</button>
+</header>
+
+<section id="resources" class="resources" aria-label="Resources"></section>
+
+<main>
+  <section id="panel-do" class="panel" data-tab="do">
+    <div id="actions" class="actions" aria-label="Actions"></div>
+    <div class="section-head"><h2>This run's rules</h2></div>
+    <div id="mechanics" class="mechanics"></div>
+  </section>
+
+  <section id="panel-build" class="panel" data-tab="build" hidden>
+    <div id="generators" class="cards" aria-label="Buildings"></div>
+  </section>
+
+  <section id="panel-research" class="panel" data-tab="research" hidden>
+    <div id="upgrades" class="cards" aria-label="Upgrades"></div>
+  </section>
+
+  <section id="panel-ascend" class="panel" data-tab="ascend" hidden>
+    <div id="prestige-head" class="prestige-head"></div>
+    <div id="prestige-upgrades" class="cards" aria-label="Permanent upgrades"></div>
+  </section>
+</main>
+
+<nav class="tabbar" aria-label="Sections">
+  <button class="tab is-active" data-tab="do">Work</button>
+  <button class="tab" data-tab="build">Build<i class="badge" hidden></i></button>
+  <button class="tab" data-tab="research">Research<i class="badge" hidden></i></button>
+  <button class="tab" data-tab="ascend">Ascend<i class="badge" hidden></i></button>
+</nav>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<dialog id="menu" class="menu">
+  <h2>This run</h2>
+  <p class="menu-seed">Seed <code id="menu-seed">—</code></p>
+  <div id="menu-stats" class="menu-stats"></div>
+  <div class="menu-actions">
+    <button id="btn-copy-seed" class="btn">Copy seed</button>
+    <button id="btn-export" class="btn">Export save</button>
+    <button id="btn-import" class="btn">Import save</button>
+  </div>
+  <h2>New world</h2>
+  <p class="hint">A new seed is a different game — different resources, different rules,
+    different everything. This discards the current run.</p>
+  <div class="menu-actions">
+    <input id="menu-new-seed" class="input" inputmode="numeric" placeholder="seed (blank = random)">
+    <button id="btn-new" class="btn btn-danger">Generate</button>
+  </div>
+  <button id="btn-close-menu" class="btn btn-wide">Close</button>
+</dialog>
+
+<script>
+"use strict";
+/* ==========================================================================
+   incgame — standalone build
+
+   A port of incgame/{rng,generator,engine,view}.py to the browser. Structure and
+   TUNING values follow the Python source; the PRNG differs (mulberry32 vs
+   Mersenne Twister), so seed 42 here is not seed 42 there. Within this build a
+   seed is fully reproducible, which is the property that matters to a player.
+   ========================================================================== */
+
+/* -- number formatting (mirrors model.fmt_number) ------------------------- */
+
+const SUFFIXES = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc'];
+
+function fmt(value, places = 2) {
+  if (Number.isNaN(value)) return 'NaN';
+  if (!Number.isFinite(value)) return value > 0 ? '∞' : '-∞';
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  if (abs < 1000) {
+    if (abs === Math.trunc(abs)) return sign + Math.trunc(abs);
+    return sign + (abs < 10 ? abs.toFixed(places) : abs.toFixed(1));
+  }
+  const tier = Math.floor(Math.log10(abs) / 3);
+  if (tier < SUFFIXES.length) return sign + (abs / Math.pow(1000, tier)).toFixed(places) + SUFFIXES[tier];
+  return sign + abs.toExponential(2);
+}
+
+function fmtRate(v) {
+  if (Math.abs(v) < 1e-9) return '0/s';
+  return (v > 0 ? '+' : '−') + fmt(Math.abs(v)) + '/s';
+}
+
+function fmtDuration(seconds) {
+  const t = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+/* -- seeded randomness (mirrors rng.py) ----------------------------------- */
+
+function mulberry32(a) {
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+class Rng {
+  constructor(seed) { this.next = mulberry32(seed >>> 0); }
+  random() { return this.next(); }
+  uniform(a, b) { return a + (b - a) * this.next(); }
+  randint(a, b) { return a + Math.floor(this.next() * (b - a + 1)); }
+  choice(arr) { return arr[Math.floor(this.next() * arr.length)]; }
+  sample(arr, n) {
+    const pool = arr.slice();
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, Math.max(0, Math.min(n, pool.length)));
+  }
+  jitter(value, spread = 0.25) { return value * (1 + this.uniform(-spread, spread)); }
+  weighted(pairs) {
+    const total = pairs.reduce((s, [, w]) => s + Math.max(0, w), 0);
+    let roll = this.next() * total;
+    for (const [item, w] of pairs) { roll -= Math.max(0, w); if (roll <= 0) return item; }
+    return pairs[pairs.length - 1][0];
+  }
+}
+
+/** Snap to a number a player reads as deliberate rather than generated. */
+function roundNice(value) {
+  if (value <= 0) return 0;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const scaled = value / magnitude;
+  for (const step of [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]) if (scaled <= step) return step * magnitude;
+  return 10 * magnitude;
+}
+
+function hslHex(h, s, l) {
+  const f = n => {
+    const k = (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+
+/** Evenly spread hues so no two resources in a run are hard to tell apart. */
+function palette(rng, count) {
+  const offset = rng.random();
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const hue = (offset + i / Math.max(1, count) + rng.uniform(-0.03, 0.03) + 1) % 1;
+    out.push(hslHex(hue, rng.uniform(0.55, 0.85), rng.uniform(0.58, 0.72)));
+  }
+  return out;
+}
+
+function slug(text) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+/** Hands out names without repeating itself; a duplicate name reads as a bug. */
+class Namer {
+  constructor(rng) { this.rng = rng; this.used = new Set(); }
+  unique(...pools) {
+    let candidate = '';
+    for (let i = 0; i < 24; i++) {
+      candidate = pools.map(p => this.rng.choice(p)).join(' ');
+      if (!this.used.has(candidate)) { this.used.add(candidate); return candidate; }
+    }
+    for (const suffix of [' II', ' III', ' IV', ' V', ' VI']) {
+      if (!this.used.has(candidate + suffix)) { this.used.add(candidate + suffix); return candidate + suffix; }
+    }
+    return candidate;
+  }
+}
+
+/* -- word pools (mirrors names.py) ---------------------------------------- */
+
+const N = {
+  ADJ: ['Luminous','Fractal','Hollow','Verdant','Gilded','Umbral','Crystalline','Sundered','Woven','Placid','Feral','Latent','Radiant','Quiet','Molten','Frozen','Drifting','Ancient','Nascent','Eternal','Restless','Silent','Vivid','Pale','Deep','Wild','Tame','Bright','Dim','Vast','Brittle','Supple','Errant','Patient','Sullen','Tidal','Vagrant','Wakeful','Cindered','Glassen','Riven','Sodden','Tempered','Unbound','Waning','Waxing','Hushed','Keen','Numb','Opaline'],
+  RES: ['Essence','Ember','Filament','Lumen','Grain','Chime','Cinder','Dust','Echo','Fragment','Glyph','Husk','Ichor','Kernel','Lattice','Mote','Nectar','Ore','Pulse','Quill','Resin','Sap','Shard','Silt','Spark','Tide','Vein','Whisper','Yield','Bloom','Coil','Drift','Flux','Gleam','Haze','Loam','Murmur','Rime','Thread','Brine','Chaff','Ash','Marrow','Vapour','Sediment','Static','Tincture','Verdure','Wick','Zephyr'],
+  VERB: ['Gather','Coax','Sift','Kindle','Thresh','Distill','Fold','Harvest','Tap','Whittle','Draw','Stir','Weave','Refine','Temper','Grind','Siphon','Nurture','Prune','Chase','Sound','Bind','Unspool','Quicken','Scatter','Anneal','Winnow','Rouse','Steep','Press','Gild','Cull','Braid','Leach','Render','Sluice','Tease','Knead','Skim','Provoke'],
+  GEN: ['Loom','Kiln','Orchard','Cistern','Rookery','Foundry','Glasshouse','Aviary','Mill','Hearth','Weir','Apiary','Grotto','Spire','Terrace','Furnace','Trellis','Reliquary','Conduit','Vat','Bellows','Wellspring','Nursery','Garden','Manifold','Sluiceway','Dovecote','Smithy','Cellar','Refinery','Colonnade','Aqueduct','Crucible','Lantern','Beacon','Silo'],
+  UPG: ['Attunement','Doctrine','Insight','Protocol','Ritual','Schema','Sigil','Technique','Theorem','Alignment','Calibration','Discipline','Etching','Grammar','Habit','Method','Praxis','Refrain','Tuning','Cadence','Codex','Gesture','Lemma','Mantra','Notation','Ordinance','Precept','Rubric','Stanza','Treatise'],
+  FAMILY: ['Husbandry','Metallurgy','Cartography','Rhetoric','Alchemy','Masonry','Astronomy','Botany','Horology','Cryptography','Acoustics','Optics','Ceramics','Navigation','Taxonomy','Rheology','Glassblowing','Falconry'],
+  PRESTIGE: ['Ascendance','Continuum','Legacy','Remnant','Testament','Afterglow','Palimpsest','Residue','Inheritance','Keepsake','Sediment','Watermark','Patina','Vestige','Relic'],
+  TITLE: ['Foundry','Orchard','Archive','Meridian','Threshold','Confluence','Reliquary','Aviary','Terrace','Observatory','Estuary','Bastion','Cloister','Hollow','Expanse','Waystation','Menagerie','Conservatory'],
+  OPEN: ['Nothing here remembers the last attempt.','The ledgers are blank and the machines are cold.','You arrive before the first measurement is taken.','Everything is still potential, which is to say: nothing works yet.','The place was built by someone with different priorities.','It has been quiet for a long time.','The inventory is a rumour and the tools are unfamiliar.','Whatever ran this before left no instructions.'],
+  CLOSE: ['Begin with your hands.','Start small; the rest compounds.','Find out what feeds what.','The order of operations is yours to discover.','Some of it will be worth automating.','Learn the ratios before you commit.','Waste is only waste if nothing downstream wants it.'],
+  RES_DESC: ['Accumulates in the low places. Everything else starts here.','Fine enough to slip through a closed hand.','Cold to the touch and faintly reluctant.','Worth more once it has been through something.','Measured by volume, valued by clarity.','Keeps its shape only while you are watching.','The residue of work already done.','Dense, patient, and slow to give anything up.','Bright at first. Less so by morning.','Refuses to be stored for long.'],
+  ACT_DESC: ['Slow work, but it needs no equipment.','Repetitive. Effective. Unglamorous.','The yield depends mostly on your patience.','A conversion anyone can perform badly.','Costs something. Returns something better.','Best done in batches, if you can afford them.','The first thing you learn and the last thing you stop doing.'],
+  GEN_DESC: ['Runs without supervision, which is the entire point.','Noisy, but it never asks for a break.','Pays for itself eventually. Eventually is doing a lot of work here.','Wants feeding. Produces more than it eats.','Each one you add makes the next one dearer.','Built once, tended never.'],
+  UPG_DESC: ['A better way of doing what you already do.','Obvious in hindsight.','Someone worked this out before you and wrote it down badly.','Marginal on its own. Not on its own for long.','Changes the arithmetic, not the work.','Trades understanding for throughput.'],
+};
+
+/* -- tuning (mirrors generator.TUNING) ------------------------------------ */
+
+const TUNING = {
+  resourcesMin: 3, resourcesMax: 6,
+  clickActions: [1, 2], convertsPerTier: [1, 2],
+  clickYield: [0.8, 1.4], convertRatio: [6, 14], convertCooldown: [0.25, 1.5],
+  generatorsPerResource: [1, 2],
+  genRateTier0: [0.25, 1.1],
+  // 0.16 made a tier-4 generator produce one unit per forty minutes: buyable, and
+  // doing nothing. 0.22 keeps deep tiers worth building.
+  genRateFalloff: 0.22,
+  genBaseCostTier0: [10, 30], genCostGrowth: [1.12, 1.21],
+  genUpkeepChance: 0.55, genUpkeepFraction: [0.15, 0.6],
+  upgradeFamilies: [3, 5], upgradeTiers: 5, upgradesPerTier: [6, 12],
+  // Raised from [60,25,10,6,4,3] once effects started targeting content at the
+  // player's own depth: they stopped being wasted, worth ~40% more in practice.
+  costUnitByTier: [108, 45, 18, 11, 7, 5],
+  // Raised from 2.6: at that value the top of the tree was barely dearer than the
+  // middle and ~14% of seeds bought the whole thing inside twenty minutes.
+  costTierStep: 3.4,
+  gateTierStep: 2.2, gateUnitScale: 1.5,
+  requiresChance: 0.55,
+  mechanics: [2, 4],
+  decayChance: 0.45, decayRate: [0.004, 0.02],
+  prestigeUpgrades: [6, 9],
+  // Score weights each resource by 10^tier, so a deep chain scores an order of
+  // magnitude faster than a shallow one. Scaling by depth keeps the same number
+  // from meaning two different games.
+  prestigeDivisor: 3800, prestigeDepthScale: 0.9,
+  // Geometric, because permanent multipliers compound. A linear surcharge loses
+  // that race and the loop collapses to a 25-second treadmill.
+  prestigeEscalation: [1.7, 2.2],
+};
+
+const FAMILY_SPECIALTIES = ['action', 'generator', 'resource', 'capacity', 'efficiency', 'critical'];
+const MIN_UPGRADE_GAIN = 1.08;
+const MIN_REDUCTION = 0.05;
+const MAX_OFFLINE_SECONDS = 8 * 3600;
+const TEASE_THRESHOLD = 0.35;
+
+/* -- generation (mirrors generator.py) ------------------------------------ */
+
+/** A multiplier that is always worth buying. Rolling raw crosses 1.0. */
+function gain(rng, base) { return Math.round(Math.max(MIN_UPGRADE_GAIN, rng.jitter(base, 0.2)) * 1000) / 1000; }
+
+function generateGame(seed) {
+  const rng = new Rng(seed);
+  const namer = new Namer(rng);
+
+  const baseHue = rng.random();
+  const theme = {
+    hue: (baseHue * 360).toFixed(1),
+    accent: hslHex(baseHue, 0.72, 0.66),
+    secondary: hslHex((baseHue + 0.5) % 1, 0.45, 0.62),
+  };
+
+  const resources = genResources(rng, namer);
+  const maxTier = Math.max(...resources.map(r => r.tier));
+  const actions = genActions(rng, namer, resources);
+  let generators = genGenerators(rng, namer, resources);
+  let upgrades = genUpgrades(rng, namer, resources, actions, generators, maxTier);
+  ({ upgrades, generators } = wireUnlockUpgrade(rng, upgrades, actions, generators));
+  const mechanics = genMechanics(rng, namer, resources, actions, upgrades);
+  applyScarcity(resources, mechanics);
+  const prestige = genPrestige(rng, namer, resources, theme);
+
+  const game = {
+    seed,
+    title: 'The ' + namer.unique(N.ADJ, N.TITLE),
+    flavor: rng.choice(N.OPEN) + ' ' + rng.choice(N.CLOSE),
+    theme, resources, actions, generators, upgrades, mechanics,
+    maxTier,
+    prestigeName: prestige.name,
+    prestigeUpgrades: prestige.upgrades,
+    prestigeDivisor: roundNice(rng.jitter(TUNING.prestigeDivisor * (1 + TUNING.prestigeDepthScale * maxTier), 0.3)),
+    prestigeEscalation: rng.uniform(...TUNING.prestigeEscalation),
+  };
+
+  game.byId = {
+    resource: Object.fromEntries(resources.map(r => [r.id, r])),
+    action: Object.fromEntries(actions.map(a => [a.id, a])),
+    generator: Object.fromEntries(generators.map(g => [g.id, g])),
+    upgrade: Object.fromEntries(upgrades.map(u => [u.id, u])),
+    prestige: Object.fromEntries(prestige.upgrades.map(p => [p.id, p])),
+  };
+
+  validate(game);
+  return game;
+}
+
+function genResources(rng, namer) {
+  const count = rng.randint(TUNING.resourcesMin, TUNING.resourcesMax);
+
+  // Always a tier 0. Sometimes two resources share a tier, which gives a
+  // branching economy rather than a single ladder.
+  const tiers = [0];
+  let current = 0;
+  for (let i = 1; i < count; i++) {
+    if (current > 0 && rng.random() < 0.28) tiers.push(current);
+    else tiers.push(++current);
+  }
+
+  const colors = palette(rng, count);
+  return tiers.map((tier, i) => {
+    // Tier 0 gets a plain noun, refined tiers an adjective, so the chain reads as
+    // raw material -> product without needing a tooltip.
+    const name = tier === 0 ? namer.unique(N.RES) : namer.unique(N.ADJ, N.RES);
+    let cap = Infinity;
+    if (rng.random() >= 0.35) cap = roundNice(rng.jitter(Math.max(25, 2000 / Math.pow(4, tier)), 0.35));
+    return {
+      id: slug(name), name, color: colors[i], tier, cap, decay: 0,
+      description: rng.choice(N.RES_DESC),
+    };
+  });
+}
+
+function genActions(rng, namer, resources) {
+  const actions = [];
+  const base = resources.filter(r => r.tier === 0);
+
+  // Free clicks, never gated: a run must be playable in the first frame.
+  const clicks = rng.randint(...TUNING.clickActions);
+  for (let i = 0; i < clicks; i++) {
+    const resource = base[i % base.length];
+    const name = namer.unique(N.VERB, [resource.name]);
+    actions.push({
+      id: slug(name), name, kind: 'click', description: rng.choice(N.ACT_DESC),
+      cost: {}, output: { [resource.id]: roundNice(rng.jitter(rng.uniform(...TUNING.clickYield), 0.2)) },
+      cooldown: 0, unlock: { kind: 'none' },
+    });
+  }
+
+  // Converts: the spine of the economy. Without them higher tiers are unreachable.
+  const byTier = {};
+  resources.forEach(r => (byTier[r.tier] ??= []).push(r));
+  for (const tier of Object.keys(byTier).map(Number).filter(t => t > 0).sort((a, b) => a - b)) {
+    const inputs = byTier[tier - 1] || byTier[0];
+    for (const resource of byTier[tier]) {
+      for (let i = 0; i < rng.randint(...TUNING.convertsPerTier); i++) {
+        const source = rng.choice(inputs);
+        const ratio = roundNice(rng.jitter(rng.uniform(...TUNING.convertRatio), 0.2));
+        const name = namer.unique(N.VERB, [resource.name]);
+        actions.push({
+          id: slug(name), name, kind: 'convert', description: rng.choice(N.ACT_DESC),
+          cost: { [source.id]: ratio },
+          output: { [resource.id]: roundNice(rng.jitter(1, 0.25)) },
+          cooldown: Math.round(rng.uniform(...TUNING.convertCooldown) * 100) / 100,
+          unlock: { kind: 'resource_total', target: source.id, amount: roundNice(ratio * rng.uniform(2, 6)) },
+        });
+      }
+    }
+  }
+  return actions;
+}
+
+function genGenerators(rng, namer, resources) {
+  const generators = [];
+  const byTier = {};
+  resources.forEach(r => (byTier[r.tier] ??= []).push(r));
+
+  for (const resource of resources) {
+    for (let i = 0; i < rng.randint(...TUNING.generatorsPerResource); i++) {
+      const name = namer.unique(N.ADJ, N.GEN);
+      const rate = Number(rng.jitter(
+        rng.uniform(...TUNING.genRateTier0) * Math.pow(TUNING.genRateFalloff, resource.tier), 0.25
+      ).toPrecision(4));
+
+      // Bought with the tier below what they make, so every purchase trades off
+      // against converting by hand.
+      const lower = byTier[resource.tier - 1];
+      const costResource = lower ? rng.choice(lower) : resource;
+      const scale = TUNING.costUnitByTier[Math.min(costResource.tier, 5)] / TUNING.costUnitByTier[0];
+      const baseCost = roundNice(rng.jitter(rng.uniform(...TUNING.genBaseCostTier0) * Math.max(0.15, scale) * 2.5, 0.3));
+
+      const upkeep = {};
+      if (resource.tier > 0 && lower && rng.random() < TUNING.genUpkeepChance) {
+        const feed = rng.choice(lower);
+        upkeep[feed.id] = Number((rate * rng.uniform(...TUNING.genUpkeepFraction) * 8).toPrecision(4));
+      }
+
+      let unlock = { kind: 'none' };
+      if (resource.tier > 0 || generators.length) {
+        unlock = { kind: 'resource_total', target: costResource.id, amount: roundNice(baseCost * rng.uniform(0.6, 1.4)) };
+      }
+
+      generators.push({
+        id: slug(name), name, description: rng.choice(N.GEN_DESC),
+        resource: resource.id, rate, costResource: costResource.id,
+        baseCost, costGrowth: Math.round(rng.uniform(...TUNING.genCostGrowth) * 1000) / 1000,
+        upkeep, unlock,
+      });
+    }
+  }
+
+  // The first generator must be reachable immediately, or the opening stalls on
+  // clicking with nothing to spend on.
+  const tier0 = new Set(resources.filter(r => r.tier === 0).map(r => r.id));
+  const first = generators.find(g => tier0.has(g.resource));
+  if (first) first.unlock = { kind: 'none' };
+  return generators;
+}
+
+function genUpgrades(rng, namer, resources, actions, generators, maxTier) {
+  const families = rng.sample(N.FAMILY, rng.randint(...TUNING.upgradeFamilies));
+  const specialties = Object.fromEntries(families.map(f => [f, rng.choice(FAMILY_SPECIALTIES)]));
+  const upgrades = [];
+  const byFamily = Object.fromEntries(families.map(f => [f, []]));
+
+  for (let tier = 0; tier < TUNING.upgradeTiers; tier++) {
+    for (let i = 0; i < rng.randint(...TUNING.upgradesPerTier); i++) {
+      const family = rng.choice(families);
+      const name = namer.unique(N.ADJ, N.UPG);
+      const upgrade = {
+        id: slug(name), name, family, tier,
+        description: rng.choice(N.UPG_DESC),
+        cost: upgradeCost(rng, tier, maxTier, resources),
+        effects: genEffects(rng, specialties[family], tier, resources, actions, generators),
+        requires: [],
+        unlock: tier === 0 ? { kind: 'none' } : rng.weighted([
+          [{ kind: 'upgrades_owned', target: '', amount: 2 + 3 * tier }, 2],
+          [{ kind: 'family_owned', target: family, amount: 1 + tier }, 1],
+          [resourceGate(rng, tier, maxTier, resources), 1.5],
+        ]),
+      };
+      upgrades.push(upgrade);
+      byFamily[family].push(upgrade);
+    }
+  }
+
+  // Shallow trees: requirements only ever point at a lower tier in the same
+  // family, which makes cycles structurally impossible rather than a thing to test.
+  for (const members of Object.values(byFamily)) {
+    const ordered = members.slice().sort((a, b) => a.tier - b.tier);
+    ordered.forEach((upgrade, index) => {
+      if (index === 0 || upgrade.tier === 0) return;
+      const earlier = ordered.slice(0, index).filter(u => u.tier < upgrade.tier);
+      if (earlier.length && rng.random() < TUNING.requiresChance) upgrade.requires = [rng.choice(earlier).id];
+    });
+  }
+  return upgrades;
+}
+
+function upgradeCost(rng, tier, maxTier, resources) {
+  const wantTier = Math.min(maxTier, Math.max(0, tier - rng.choice([0, 0, 1])));
+  const candidates = resources.filter(r => r.tier === wantTier);
+  const resource = rng.choice(candidates.length ? candidates : resources);
+  const unit = TUNING.costUnitByTier[Math.min(resource.tier, 5)];
+  const amount = unit * Math.pow(TUNING.costTierStep, Math.max(0, tier - resource.tier));
+  return { [resource.id]: roundNice(rng.jitter(amount, 0.3)) };
+}
+
+/**
+ * A gate priced in the same per-tier units as costs.
+ *
+ * Scaling by the upgrade's tier alone demanded 9,720 of a resource that caps at
+ * 25 — the upgrade hid forever and the run silently lost part of its tree.
+ */
+function resourceGate(rng, tier, maxTier, resources) {
+  const wantTier = Math.min(maxTier, rng.randint(0, tier));
+  const candidates = resources.filter(r => r.tier === wantTier);
+  const resource = rng.choice(candidates.length ? candidates : resources);
+  const unit = TUNING.costUnitByTier[Math.min(resource.tier, 5)];
+  const amount = unit * Math.pow(TUNING.gateTierStep, tier) * TUNING.gateUnitScale;
+  return { kind: 'resource_total', target: resource.id, amount: roundNice(rng.jitter(amount, 0.25)) };
+}
+
+function genEffects(rng, specialty, tier, resources, actions, generators) {
+  // Tier 0 is never probabilistic: the first upgrade has to teach you that
+  // upgrades do something, and "+4% chance of x3.6" is unreadable at that point.
+  // And the specialty holds only ~70% of the time, or three cards from one family
+  // sit next to each other reading identically.
+  if (tier === 0) specialty = rng.choice(['action', 'generator', 'resource']);
+  else if (rng.random() < 0.3) specialty = rng.choice(FAMILY_SPECIALTIES);
+
+  const strength = 1 + 0.12 * tier;
+  const effects = [oneEffect(rng, specialty, tier, strength, resources, actions, generators)];
+  if (tier >= 2 && rng.random() < 0.3) {
+    effects.push(oneEffect(rng, rng.choice(FAMILY_SPECIALTIES), tier, strength * 0.7, resources, actions, generators));
+  }
+  if (tier >= 3 && rng.random() < 0.18) effects.push({ kind: 'global_mult', target: '', value: gain(rng, 1.06 + 0.02 * tier) });
+  return effects;
+}
+
+/**
+ * Prefer a target the player can plausibly already have.
+ *
+ * A tier-0 upgrade boosting storage of a tier-3 resource is not wrong, but it is
+ * unreadable and unfelt as the first thing a new run shows you.
+ */
+function targetForTier(rng, tier, candidates, tierOf) {
+  const reachable = candidates.filter(c => tierOf(c) <= tier + 1);
+  return rng.choice(reachable.length ? reachable : candidates);
+}
+
+function oneEffect(rng, specialty, tier, strength, resources, actions, generators) {
+  const wildcard = rng.random() < 0.25;
+  const resourceTier = r => r.tier;
+  const outputTier = item => {
+    const ids = item.output ? Object.keys(item.output) : [item.resource];
+    const tiers = resources.filter(r => ids.includes(r.id)).map(r => r.tier);
+    return tiers.length ? Math.max(...tiers) : 0;
+  };
+
+  if (specialty === 'action' && actions.length) {
+    return { kind: 'action_yield', target: wildcard ? '*' : targetForTier(rng, tier, actions, outputTier).id, value: gain(rng, 1.2 * strength) };
+  }
+  if (specialty === 'generator' && generators.length) {
+    return { kind: 'generator_rate', target: wildcard ? '*' : targetForTier(rng, tier, generators, outputTier).id, value: gain(rng, 1.25 * strength) };
+  }
+  if (specialty === 'resource') {
+    return { kind: 'resource_rate', target: wildcard ? '*' : targetForTier(rng, tier, resources, resourceTier).id, value: gain(rng, 1.3 * strength) };
+  }
+  if (specialty === 'capacity') {
+    const capped = resources.filter(r => Number.isFinite(r.cap));
+    if (capped.length) return { kind: 'resource_cap', target: targetForTier(rng, tier, capped, resourceTier).id, value: gain(rng, 1.8 + 0.3 * tier) };
+    return { kind: 'resource_rate', target: targetForTier(rng, tier, resources, resourceTier).id, value: gain(rng, 1.25 * strength) };
+  }
+  if (specialty === 'efficiency') {
+    if (generators.length && rng.random() < 0.5) {
+      return { kind: 'generator_cost', target: wildcard ? '*' : rng.choice(generators).id, value: 1 - Math.min(0.14, 0.05 + 0.015 * tier) };
+    }
+    const cooldowns = actions.filter(a => a.cooldown > 0);
+    if (cooldowns.length) return { kind: 'cooldown', target: rng.choice(cooldowns).id, value: 1 - Math.min(0.3, 0.1 + 0.04 * tier) };
+    return { kind: 'generator_rate', target: '*', value: gain(rng, 1.15 * strength) };
+  }
+  if (specialty === 'critical' && actions.length) {
+    return {
+      kind: 'crit_chance', target: wildcard ? '*' : rng.choice(actions).id,
+      value: Math.min(0.3, rng.jitter(0.04 + 0.015 * tier, 0.25)),
+      mult: Math.round(rng.jitter(3 + tier, 0.3) * 100) / 100,
+    };
+  }
+  return { kind: 'global_mult', target: '', value: gain(rng, 1.05 + 0.015 * tier) };
+}
+
+/**
+ * Make one thing unlockable by research instead of by threshold.
+ *
+ * Only tier-0 upgrades are used as the key, so the unlock can never end up gated
+ * behind the thing it unlocks.
+ */
+function wireUnlockUpgrade(rng, upgrades, actions, generators) {
+  const keys = upgrades.filter(u => u.tier === 0 && u.unlock.kind === 'none');
+  const gatedActions = actions.filter(a => a.kind === 'convert');
+  const gatedGenerators = generators.filter(g => g.unlock.kind !== 'none');
+  if (!keys.length || (!gatedActions.length && !gatedGenerators.length)) return { upgrades, generators };
+
+  const key = rng.choice(keys);
+  const gate = { kind: 'upgrade_owned', target: key.id, amount: 1 };
+  const target = (gatedActions.length && (!gatedGenerators.length || rng.random() < 0.5))
+    ? rng.choice(gatedActions) : rng.choice(gatedGenerators);
+  target.unlock = gate;
+  key.description = `Working notes that make ${target.name} possible.`;
+  return { upgrades, generators };
+}
+
+function genMechanics(rng, namer, resources, actions, upgrades) {
+  const name = () => namer.unique(N.ADJ, N.UPG);
+  const builders = {
+    synergy: () => {
+      const families = [...new Set(upgrades.map(u => u.family))];
+      if (!families.length) return null;
+      const family = rng.choice(families);
+      const per = Math.round(rng.jitter(0.06, 0.4) * 10000) / 10000;
+      const kind = rng.choice(['global_mult', 'action_yield', 'generator_rate']);
+      const label = { global_mult: 'all production', action_yield: 'every action', generator_rate: 'every generator' }[kind];
+      const n = name();
+      return { id: slug(n), kind: 'synergy', name: n, params: { family, per, effectKind: kind },
+        description: `Each ${family} upgrade you own raises ${label} by ${(per * 100).toFixed(1)}%.` };
+    },
+    cascade: () => {
+      if (actions.length < 2) return null;
+      const [source, other] = rng.sample(actions, 2);
+      const chance = Math.round(rng.jitter(0.12, 0.4) * 10000) / 10000;
+      const n = name();
+      return { id: slug(n), kind: 'cascade', name: n, params: { action: source.id, other: other.id, chance },
+        description: `${(chance * 100).toFixed(0)}% of the time, ${source.name} also triggers ${other.name} for free — cost and cooldown ignored.` };
+    },
+    overflow: () => {
+      const capped = resources.filter(r => Number.isFinite(r.cap));
+      if (!capped.length || resources.length < 2) return null;
+      const source = rng.choice(capped);
+      const dest = rng.choice(resources.filter(r => r.id !== source.id));
+      const ratio = Math.round(rng.jitter(0.08, 0.5) * 10000) / 10000;
+      const n = name();
+      return { id: slug(n), kind: 'overflow', name: n, params: { source: source.id, dest: dest.id, ratio },
+        description: `${source.name} past its cap is not lost: it spills into ${dest.name} at ${ratio.toFixed(3)} per unit.` };
+    },
+    momentum: () => {
+      const window = Math.round(rng.uniform(1.2, 3) * 100) / 100;
+      const perClick = Math.round(rng.jitter(0.04, 0.4) * 10000) / 10000;
+      const maxStacks = rng.randint(10, 40);
+      const n = name();
+      return { id: slug(n), kind: 'momentum', name: n, params: { window, perClick, maxStacks },
+        description: `Consecutive actions within ${window.toFixed(1)}s stack +${(perClick * 100).toFixed(1)}% output, up to ${maxStacks} stacks. Pausing resets it.` };
+    },
+    resonance: () => {
+      const everyN = rng.randint(5, 13);
+      const mult = Math.round(rng.jitter(4, 0.35) * 100) / 100;
+      const n = name();
+      return { id: slug(n), kind: 'resonance', name: n, params: { everyN, mult },
+        description: `Every ${everyN}th action pays out ×${mult.toFixed(1)}.` };
+    },
+    symbiosis: () => {
+      if (resources.length < 2) return null;
+      const [target, driver] = rng.sample(resources, 2);
+      const coeff = Math.round(rng.jitter(0.18, 0.4) * 10000) / 10000;
+      const n = name();
+      return { id: slug(n), kind: 'symbiosis', name: n, params: { resource: target.id, driver: driver.id, coeff },
+        description: `${target.name} production scales with how much ${driver.name} you are holding: +${(coeff * 100).toFixed(0)}% per order of magnitude.` };
+    },
+    scarcity: () => {
+      // Only refined resources decay; a decaying tier 0 makes the opening minute
+      // feel broken rather than tense.
+      const candidates = resources.filter(r => r.tier > 0);
+      if (!candidates.length || rng.random() > TUNING.decayChance) return null;
+      const resource = rng.choice(candidates);
+      const rate = Math.round(rng.uniform(...TUNING.decayRate) * 100000) / 100000;
+      const n = name();
+      return { id: slug(n), kind: 'scarcity', name: n, params: { resource: resource.id, decay: rate },
+        description: `${resource.name} will not sit still: it loses ${(rate * 100).toFixed(2)}% of itself every second. Spend it or lose it.` };
+    },
+  };
+
+  const wanted = rng.randint(...TUNING.mechanics);
+  const out = [];
+  for (const kind of rng.sample(Object.keys(builders), Object.keys(builders).length)) {
+    if (out.length >= wanted) break;
+    const built = builders[kind]();
+    if (built) out.push(built);
+  }
+  return out;
+}
+
+function applyScarcity(resources, mechanics) {
+  for (const mechanic of mechanics) {
+    if (mechanic.kind !== 'scarcity') continue;
+    const resource = resources.find(r => r.id === mechanic.params.resource);
+    if (resource) resource.decay = mechanic.params.decay;
+  }
+}
+
+function genPrestige(rng, namer, resources, theme) {
+  const name = namer.unique(N.ADJ, N.PRESTIGE);
+  const upgrades = [];
+
+  // Every run gets one repeatable global multiplier — the backbone of
+  // meta-progression: always worth something, never the only thing worth buying.
+  const spine = namer.unique(N.ADJ, N.UPG);
+  upgrades.push({
+    id: slug(spine), name: spine,
+    description: 'Permanently raises all production. Buy it again as often as you can.',
+    baseCost: 1, maxLevel: 50, costGrowth: rng.uniform(1.45, 1.75),
+    effects: [{ kind: 'global_mult', target: '', value: gain(rng, 1.12) }],
+  });
+
+  // And one head start, so a fresh run after prestige does not begin with the
+  // same bare-hands minute every single time.
+  const base = resources.filter(r => r.tier === 0);
+  if (base.length) {
+    const headStart = rng.choice(base);
+    const label = namer.unique(N.ADJ, N.UPG);
+    upgrades.push({
+      id: slug(label), name: label,
+      description: `Begin each run holding ${headStart.name}.`,
+      baseCost: 2, maxLevel: 25, costGrowth: rng.uniform(1.5, 1.9),
+      effects: [{ kind: 'start_resource', target: headStart.id, value: roundNice(rng.jitter(60, 0.3)) }],
+    });
+  }
+
+  const count = rng.randint(...TUNING.prestigeUpgrades);
+  while (upgrades.length < count) {
+    const label = namer.unique(N.ADJ, N.UPG);
+    const specialty = rng.choice(FAMILY_SPECIALTIES);
+    const repeatable = rng.random() < 0.5;
+    let effect;
+    if (specialty === 'action') effect = { kind: 'action_yield', target: '*', value: gain(rng, 1.25) };
+    else if (specialty === 'generator') effect = { kind: 'generator_rate', target: '*', value: gain(rng, 1.3) };
+    else if (specialty === 'resource') effect = { kind: 'resource_rate', target: rng.choice(resources).id, value: gain(rng, 1.5) };
+    else if (specialty === 'efficiency') effect = { kind: 'generator_cost', target: '*', value: 1 - rng.jitter(0.07, 0.3) };
+    else if (specialty === 'critical') effect = { kind: 'crit_chance', target: '*', value: rng.jitter(0.05, 0.3), mult: Math.round(rng.jitter(4, 0.3) * 100) / 100 };
+    else {
+      const capped = resources.filter(r => Number.isFinite(r.cap));
+      effect = capped.length
+        ? { kind: 'resource_cap', target: rng.choice(capped).id, value: gain(rng, 2.5) }
+        : { kind: 'global_mult', target: '', value: gain(rng, 1.1) };
+    }
+    upgrades.push({
+      id: slug(label), name: label, description: rng.choice(N.UPG_DESC),
+      baseCost: roundNice(rng.jitter(rng.uniform(2, 12), 0.3)),
+      maxLevel: repeatable ? rng.randint(5, 20) : 1,
+      costGrowth: repeatable ? rng.uniform(1.35, 1.8) : 1,
+      effects: [effect],
+    });
+  }
+  return { name, upgrades };
+}
+
+/**
+ * Structural invariants that make a run playable.
+ *
+ * Generated content fails in ways hand-authored content cannot: a resource
+ * nothing produces, a first frame with no available action. Each is a soft-lock,
+ * and a soft-lock is indistinguishable from a crash.
+ */
+function validate(game) {
+  const fail = why => { throw new Error('generated an invalid game: ' + why); };
+  if (!game.resources.some(r => r.tier === 0)) fail('no tier-0 resource');
+  if (!game.actions.some(a => a.unlock.kind === 'none' && !Object.keys(a.cost).length)) fail('no free opening action');
+
+  const produced = new Set(game.generators.map(g => g.resource));
+  game.actions.forEach(a => Object.keys(a.output).forEach(id => produced.add(id)));
+  const orphan = game.resources.find(r => !produced.has(r.id));
+  if (orphan) fail(`${orphan.name} has no producer`);
+
+  for (const generator of game.generators) {
+    if (generator.costGrowth <= 1) fail(`${generator.name} has no cost growth`);
+    if (!(generator.rate > 0)) fail(`${generator.name} produces nothing`);
+  }
+  for (const upgrade of game.upgrades) {
+    if (!upgrade.effects.length) fail(`${upgrade.name} does nothing`);
+    for (const req of upgrade.requires) {
+      if (game.byId.upgrade[req].tier >= upgrade.tier) fail(`${upgrade.name} requirement is not strictly earlier`);
+    }
+  }
+  if (!(game.prestigeDivisor > 0) || !game.prestigeUpgrades.length) fail('prestige is not configured');
+}
+
+/* -- engine (mirrors engine.py) ------------------------------------------- */
+
+const LIVE_STEP = 0.5, IDLE_STEP = 5;
+
+class Engine {
+  constructor(game, state) {
+    this.game = game;
+    this.state = state || this.freshState();
+    this._mods = null;
+    if (!this.state.updatedAt) this.state.updatedAt = Date.now() / 1000;
+  }
+
+  freshState() {
+    const state = {
+      amounts: {}, earned: {}, lifetime: {}, generators: {}, upgrades: [],
+      prestigeCurrency: 0, prestigeLevels: {}, ascensions: 0,
+      actionReady: {}, actionCount: 0, streak: 0, lastActionAt: 0,
+      playtime: 0, bestPoints: 0, updatedAt: Date.now() / 1000,
+    };
+    this.game.resources.forEach(r => (state.amounts[r.id] = 0));
+    return state;
+  }
+
+  /* -- modifiers --------------------------------------------------------- */
+
+  get mods() { return (this._mods ??= this.computeMods()); }
+  invalidate() { this._mods = null; }
+
+  computeMods() {
+    const mods = {
+      globalMult: 1, resourceRate: {}, resourceCap: {}, actionYield: {},
+      generatorRate: {}, generatorCost: {}, cooldown: {}, decay: {},
+      critChance: {}, critMult: {}, startResource: {},
+    };
+    const mul = (table, key, value) => { table[key] = (table[key] ?? 1) * value; };
+
+    const apply = (effect, level) => {
+      const target = effect.target || '*';
+      const v = Math.pow(effect.value, level);
+      switch (effect.kind) {
+        case 'global_mult': mods.globalMult *= v; break;
+        case 'resource_rate': mul(mods.resourceRate, target, v); break;
+        case 'resource_cap': mul(mods.resourceCap, target, v); break;
+        case 'action_yield': mul(mods.actionYield, target, v); break;
+        case 'generator_rate': mul(mods.generatorRate, target, v); break;
+        case 'generator_cost': mul(mods.generatorCost, target, v); break;
+        case 'cooldown': mul(mods.cooldown, target, v); break;
+        case 'decay': mul(mods.decay, target, v); break;
+        case 'crit_chance':
+          mods.critChance[target] = (mods.critChance[target] ?? 0) + effect.value * level;
+          mods.critMult[target] = Math.max(mods.critMult[target] ?? 1, effect.mult ?? 2);
+          break;
+        case 'start_resource':
+          mods.startResource[target] = (mods.startResource[target] ?? 0) + effect.value * level;
+          break;
+      }
+    };
+
+    for (const id of this.state.upgrades) this.game.byId.upgrade[id]?.effects.forEach(e => apply(e, 1));
+    for (const [id, level] of Object.entries(this.state.prestigeLevels)) {
+      if (level > 0) this.game.byId.prestige[id]?.effects.forEach(e => apply(e, level));
+    }
+
+    // Synergies read counts, so they run after the flat stack. This is what makes
+    // "ten cheap upgrades from one family" viable against "three expensive ones".
+    for (const mechanic of this.game.mechanics) {
+      if (mechanic.kind !== 'synergy') continue;
+      const owned = this.state.upgrades.filter(id => this.game.byId.upgrade[id]?.family === mechanic.params.family).length;
+      if (!owned) continue;
+      const factor = 1 + mechanic.params.per * owned;
+      if (mechanic.params.effectKind === 'global_mult') mods.globalMult *= factor;
+      else if (mechanic.params.effectKind === 'action_yield') mul(mods.actionYield, '*', factor);
+      else mul(mods.generatorRate, '*', factor);
+    }
+    return mods;
+  }
+
+  mult(table, key) { return (table[key] ?? 1) * (table['*'] ?? 1); }
+  reduction(table, key) { return Math.max(MIN_REDUCTION, this.mult(table, key)); }
+
+  /* -- derived ----------------------------------------------------------- */
+
+  capOf(id) {
+    const base = this.game.byId.resource[id].cap;
+    return Number.isFinite(base) ? base * this.mult(this.mods.resourceCap, id) : Infinity;
+  }
+
+  decayOf(id) {
+    const base = this.game.byId.resource[id].decay;
+    return base > 0 ? base * this.reduction(this.mods.decay, id) : 0;
+  }
+
+  generatorCost(id, count = 1) {
+    const generator = this.game.byId.generator[id];
+    const owned = this.state.generators[id] ?? 0;
+    const g = generator.costGrowth;
+    const first = generator.baseCost * Math.pow(g, owned) * this.reduction(this.mods.generatorCost, id);
+    return count <= 1 ? first : first * (Math.pow(g, count) - 1) / (g - 1);
+  }
+
+  maxAffordable(id, limit = 1000) {
+    const generator = this.game.byId.generator[id];
+    const available = this.state.amounts[generator.costResource] ?? 0;
+    const first = this.generatorCost(id, 1);
+    if (available < first) return 0;
+    const g = generator.costGrowth;
+    return Math.max(0, Math.min(limit, Math.floor(Math.log(available * (g - 1) / first + 1) / Math.log(g))));
+  }
+
+  actionYield(action) {
+    const m = this.mult(this.mods.actionYield, action.id) * this.mods.globalMult;
+    return Object.fromEntries(Object.entries(action.output).map(([id, v]) => [id, v * m]));
+  }
+
+  actionCooldown(action) {
+    return action.cooldown > 0 ? action.cooldown * this.reduction(this.mods.cooldown, action.id) : 0;
+  }
+
+  symbiosisFactor(id) {
+    let factor = 1;
+    for (const mechanic of this.game.mechanics) {
+      if (mechanic.kind !== 'symbiosis' || mechanic.params.resource !== id) continue;
+      const driver = this.state.amounts[mechanic.params.driver] ?? 0;
+      factor *= 1 + mechanic.params.coeff * Math.log10(1 + Math.max(0, driver));
+    }
+    return factor;
+  }
+
+  /**
+   * Production, drain, and per-generator efficiency.
+   *
+   * A generator whose upkeep is running dry throttles rather than stopping. That
+   * single choice is most of the mid-run tension: overbuilding a tier-2 farm
+   * quietly starves the tier-1 stock feeding it, and the fix is a decision.
+   */
+  rates() {
+    const gross = {}, drain = {}, efficiency = {}, demand = {};
+
+    for (const generator of this.game.generators) {
+      const owned = this.state.generators[generator.id] ?? 0;
+      if (!owned) continue;
+      for (const [id, per] of Object.entries(generator.upkeep)) demand[id] = (demand[id] ?? 0) + per * owned;
+    }
+
+    const supply = {};
+    for (const [id, wanted] of Object.entries(demand)) {
+      if (wanted <= 0) continue;
+      let incoming = 0;
+      for (const generator of this.game.generators) {
+        if (generator.resource === id) incoming += generator.rate * (this.state.generators[generator.id] ?? 0);
+      }
+      const capacity = (this.state.amounts[id] ?? 0) + incoming;
+      supply[id] = capacity >= wanted ? 1 : Math.max(0, capacity / wanted);
+    }
+
+    for (const generator of this.game.generators) {
+      const owned = this.state.generators[generator.id] ?? 0;
+      if (!owned) continue;
+      let eff = 1;
+      for (const id of Object.keys(generator.upkeep)) eff = Math.min(eff, supply[id] ?? 1);
+      efficiency[generator.id] = eff;
+      if (eff <= 0) continue;
+      gross[generator.resource] = (gross[generator.resource] ?? 0)
+        + generator.rate * owned * eff * this.mult(this.mods.generatorRate, generator.id);
+      for (const [id, per] of Object.entries(generator.upkeep)) drain[id] = (drain[id] ?? 0) + per * owned * eff;
+    }
+
+    for (const resource of this.game.resources) {
+      let total = gross[resource.id] ?? 0;
+      if (total <= 0) { gross[resource.id] = 0; continue; }
+      total *= this.mult(this.mods.resourceRate, resource.id) * this.mods.globalMult * this.symbiosisFactor(resource.id);
+      gross[resource.id] = total;
+    }
+    return { gross, drain, efficiency };
+  }
+
+  netRates() {
+    const { gross, drain } = this.rates();
+    const net = {};
+    for (const resource of this.game.resources) {
+      let value = (gross[resource.id] ?? 0) - (drain[resource.id] ?? 0);
+      const decay = this.decayOf(resource.id);
+      if (decay > 0) value -= (this.state.amounts[resource.id] ?? 0) * decay;
+      net[resource.id] = value;
+    }
+    return net;
+  }
+
+  /* -- simulation -------------------------------------------------------- */
+
+  advance(now = Date.now() / 1000) {
+    let elapsed = now - this.state.updatedAt;
+    if (elapsed <= 0) { this.state.updatedAt = now; return 0; }
+
+    // Chunked rather than applied in one step: decay, caps, and overflow are all
+    // path-dependent, so a single four-hour step would credit production a cap
+    // should have thrown away.
+    const simulated = Math.min(elapsed, MAX_OFFLINE_SECONDS);
+    let remaining = simulated;
+    while (remaining > 1e-9) {
+      const step = Math.min(remaining, remaining > 60 ? IDLE_STEP : LIVE_STEP);
+      this.step(step);
+      remaining -= step;
+    }
+    this.state.playtime += simulated;
+    this.state.updatedAt = now;
+    return simulated;
+  }
+
+  step(dt) {
+    const { gross, drain } = this.rates();
+    for (const [id, amount] of Object.entries(drain)) {
+      if (amount > 0) this.state.amounts[id] = Math.max(0, (this.state.amounts[id] ?? 0) - amount * dt);
+    }
+    for (const [id, amount] of Object.entries(gross)) if (amount > 0) this.credit(id, amount * dt);
+    for (const resource of this.game.resources) {
+      const decay = this.decayOf(resource.id);
+      if (decay > 0) this.state.amounts[resource.id] *= Math.exp(-decay * dt);
+    }
+  }
+
+  /** The only place amounts grows, which is what makes earnings impossible to double-count. */
+  credit(id, amount) {
+    if (amount <= 0) return;
+    const cap = this.capOf(id);
+    const current = this.state.amounts[id] ?? 0;
+
+    if (!Number.isFinite(cap) || current + amount <= cap) {
+      this.state.amounts[id] = current + amount;
+      this.state.earned[id] = (this.state.earned[id] ?? 0) + amount;
+      this.state.lifetime[id] = (this.state.lifetime[id] ?? 0) + amount;
+      return;
+    }
+
+    const room = Math.max(0, cap - current);
+    this.state.amounts[id] = cap;
+    if (room > 0) {
+      this.state.earned[id] = (this.state.earned[id] ?? 0) + room;
+      this.state.lifetime[id] = (this.state.lifetime[id] ?? 0) + room;
+    }
+    this.spill(id, amount - room);
+  }
+
+  /** Route over-cap production through any overflow mechanic. Never recurses. */
+  spill(id, excess) {
+    if (excess <= 0) return;
+    for (const mechanic of this.game.mechanics) {
+      if (mechanic.kind !== 'overflow' || mechanic.params.source !== id) continue;
+      const dest = mechanic.params.dest;
+      const gained = excess * mechanic.params.ratio;
+      if (gained <= 0) continue;
+      const cap = this.capOf(dest), current = this.state.amounts[dest] ?? 0;
+      const retained = Number.isFinite(cap) ? Math.max(0, Math.min(gained, cap - current)) : gained;
+      if (retained > 0) {
+        this.state.amounts[dest] = current + retained;
+        this.state.earned[dest] = (this.state.earned[dest] ?? 0) + retained;
+        this.state.lifetime[dest] = (this.state.lifetime[dest] ?? 0) + retained;
+      }
+    }
+  }
+
+  /**
+   * Deterministic roll from the run seed and the saved action counter, so a save
+   * replays identically — reproducibility survives the random parts.
+   */
+  roll(salt = 0) {
+    let x = Math.imul(this.game.seed ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(this.state.actionCount + 1, 0xc2b2ae35);
+    x = Math.imul(x ^ (x >>> 13), 0x27d4eb2f) ^ Math.imul(salt + 1, 0x165667b1);
+    x ^= x >>> 16;
+    return (x >>> 0) / 4294967296;
+  }
+
+  /* -- player actions ---------------------------------------------------- */
+
+  canAfford(cost) { return Object.entries(cost).every(([id, amount]) => (this.state.amounts[id] ?? 0) >= amount); }
+  spend(cost) { for (const [id, amount] of Object.entries(cost)) this.state.amounts[id] = Math.max(0, (this.state.amounts[id] ?? 0) - amount); }
+
+  doAction(id) {
+    const now = Date.now() / 1000;
+    this.advance(now);
+    const action = this.game.byId.action[id];
+    if (!action) return { ok: false, reason: 'no such action' };
+    if (!this.isUnlocked(action.unlock)) return { ok: false, reason: 'locked' };
+    if (now < (this.state.actionReady[id] ?? 0)) return { ok: false, reason: 'cooling down' };
+    if (!this.canAfford(action.cost)) return { ok: false, reason: 'cannot afford' };
+
+    this.spend(action.cost);
+    this.state.actionCount += 1;
+
+    let multiplier = this.momentumMultiplier(now);
+    this.state.lastActionAt = now;
+    multiplier *= this.resonanceMultiplier();
+    const crit = this.critMultiplier(action);
+    multiplier *= crit;
+
+    const gained = {};
+    for (const [rid, amount] of Object.entries(this.actionYield(action))) {
+      gained[rid] = amount * multiplier;
+      this.credit(rid, gained[rid]);
+    }
+
+    const cooldown = this.actionCooldown(action);
+    if (cooldown > 0) this.state.actionReady[id] = now + cooldown;
+
+    return { ok: true, gained, multiplier, crit: crit > 1, cascade: this.maybeCascade(action) };
+  }
+
+  momentumMultiplier(now) {
+    const mechanic = this.game.mechanics.find(m => m.kind === 'momentum');
+    if (!mechanic) { this.state.streak = 1; return 1; }
+    if (this.state.lastActionAt && now - this.state.lastActionAt <= mechanic.params.window) this.state.streak += 1;
+    else this.state.streak = 1;
+    return 1 + mechanic.params.perClick * Math.min(this.state.streak - 1, mechanic.params.maxStacks);
+  }
+
+  resonanceMultiplier() {
+    const mechanic = this.game.mechanics.find(m => m.kind === 'resonance');
+    if (!mechanic) return 1;
+    return this.state.actionCount % mechanic.params.everyN === 0 ? mechanic.params.mult : 1;
+  }
+
+  critMultiplier(action) {
+    const chance = (this.mods.critChance[action.id] ?? 0) + (this.mods.critChance['*'] ?? 0);
+    if (chance <= 0) return 1;
+    if (this.roll(1) >= Math.min(0.95, chance)) return 1;
+    return Math.max(this.mods.critMult[action.id] ?? 1, this.mods.critMult['*'] ?? 1);
+  }
+
+  /** One level deep on purpose: two actions pointing at each other would loop forever. */
+  maybeCascade(action) {
+    for (const mechanic of this.game.mechanics) {
+      if (mechanic.kind !== 'cascade' || mechanic.params.action !== action.id) continue;
+      if (this.roll(2) >= mechanic.params.chance) continue;
+      const other = this.game.byId.action[mechanic.params.other];
+      if (!other || !this.isUnlocked(other.unlock)) continue;
+      const gained = this.actionYield(other);
+      for (const [id, amount] of Object.entries(gained)) this.credit(id, amount);
+      return { name: other.name, gained };
+    }
+    return null;
+  }
+
+  buyGenerator(id, count = 1) {
+    this.advance();
+    const generator = this.game.byId.generator[id];
+    if (!generator || !this.isUnlocked(generator.unlock)) return { ok: false, reason: 'locked' };
+
+    let wanted = count === 'max' ? this.maxAffordable(id) : Math.max(1, count);
+    if (wanted <= 0) return { ok: false, reason: 'cannot afford' };
+    let price = this.generatorCost(id, wanted);
+    if ((this.state.amounts[generator.costResource] ?? 0) < price) {
+      wanted = this.maxAffordable(id);
+      if (wanted <= 0) return { ok: false, reason: 'cannot afford' };
+      price = this.generatorCost(id, wanted);
+    }
+
+    this.spend({ [generator.costResource]: price });
+    this.state.generators[id] = (this.state.generators[id] ?? 0) + wanted;
+    return { ok: true, bought: wanted };
+  }
+
+  buyUpgrade(id) {
+    this.advance();
+    const upgrade = this.game.byId.upgrade[id];
+    if (!upgrade) return { ok: false, reason: 'no such upgrade' };
+    if (this.state.upgrades.includes(id)) return { ok: false, reason: 'already owned' };
+    if (!this.upgradeAvailable(upgrade)) return { ok: false, reason: 'locked' };
+    if (!this.canAfford(upgrade.cost)) return { ok: false, reason: 'cannot afford' };
+    this.spend(upgrade.cost);
+    this.state.upgrades.push(id);
+    this.invalidate();
+    return { ok: true, name: upgrade.name };
+  }
+
+  buyPrestigeUpgrade(id) {
+    this.advance();
+    const upgrade = this.game.byId.prestige[id];
+    if (!upgrade) return { ok: false, reason: 'no such upgrade' };
+    const level = this.state.prestigeLevels[id] ?? 0;
+    if (level >= upgrade.maxLevel) return { ok: false, reason: 'maxed' };
+    const price = upgrade.baseCost * Math.pow(upgrade.costGrowth, level);
+    if (this.state.prestigeCurrency < price) return { ok: false, reason: 'cannot afford' };
+    this.state.prestigeCurrency -= price;
+    this.state.prestigeLevels[id] = level + 1;
+    this.invalidate();
+    return { ok: true, level: level + 1 };
+  }
+
+  /* -- prestige ---------------------------------------------------------- */
+
+  /** Weighted by depth, or prestige would reward grinding tier 0 forever. */
+  runScore() {
+    let total = 0;
+    for (const resource of this.game.resources) {
+      const earned = this.state.earned[resource.id] ?? 0;
+      if (earned > 0) total += earned * Math.pow(10, resource.tier);
+    }
+    return total;
+  }
+
+  /**
+   * Score per prestige point, escalating geometrically with each ascension.
+   *
+   * The square root below is not enough on its own: permanent multipliers
+   * compound, so score grows geometrically while sqrt only halves the exponent.
+   * A linear surcharge loses the same race and the loop collapses to seconds.
+   */
+  prestigeRequirement() {
+    return this.game.prestigeDivisor * Math.pow(this.game.prestigeEscalation, this.state.ascensions);
+  }
+
+  prestigePoints() {
+    const score = this.runScore();
+    return score <= 0 ? 0 : Math.floor(Math.sqrt(score / this.prestigeRequirement()));
+  }
+
+  prestige() {
+    this.advance();
+    const points = this.prestigePoints();
+    if (points < 1) return { ok: false, reason: 'not enough progress' };
+    this.state.prestigeCurrency += points;
+    this.state.bestPoints = Math.max(this.state.bestPoints, points);
+    this.state.ascensions += 1;
+    this.resetRun();
+    return { ok: true, points };
+  }
+
+  /** Called on prestige only; a fresh game takes the same path via freshState. */
+  resetRun() {
+    const state = this.state;
+    this.game.resources.forEach(r => (state.amounts[r.id] = 0));
+    state.earned = {};
+    state.generators = {};
+    state.upgrades = [];
+    state.actionReady = {};
+    state.actionCount = 0;
+    state.streak = 0;
+    state.lastActionAt = 0;
+    state.updatedAt = Date.now() / 1000;
+    this.invalidate();
+    for (const [id, amount] of Object.entries(this.mods.startResource)) {
+      if (id in state.amounts && amount > 0) state.amounts[id] = amount;
+    }
+  }
+
+  /* -- gates ------------------------------------------------------------- */
+
+  /** Progress rather than a boolean: the UI reveals content at partial progress. */
+  gateProgress(gate) {
+    if (!gate || gate.kind === 'none') return 1;
+    const amount = Math.max(1e-9, gate.amount);
+    switch (gate.kind) {
+      case 'resource_total': return Math.min(1, (this.state.earned[gate.target] ?? 0) / amount);
+      case 'resource_now': return Math.min(1, (this.state.amounts[gate.target] ?? 0) / amount);
+      case 'upgrades_owned': return Math.min(1, this.state.upgrades.length / amount);
+      case 'family_owned': {
+        const owned = this.state.upgrades.filter(id => this.game.byId.upgrade[id]?.family === gate.target).length;
+        return Math.min(1, owned / amount);
+      }
+      case 'upgrade_owned': return this.state.upgrades.includes(gate.target) ? 1 : 0;
+      case 'ascensions': return Math.min(1, this.state.ascensions / amount);
+      default: return 1;
+    }
+  }
+
+  isUnlocked(gate) { return this.gateProgress(gate) >= 1; }
+
+  gateText(gate) {
+    if (!gate || gate.kind === 'none') return '';
+    const resource = id => this.game.byId.resource[id]?.name ?? id;
+    switch (gate.kind) {
+      case 'resource_total': return `Earn ${fmt(gate.amount)} ${resource(gate.target)} in total`;
+      case 'resource_now': return `Hold ${fmt(gate.amount)} ${resource(gate.target)}`;
+      case 'upgrades_owned': return `Own ${gate.amount} upgrades`;
+      case 'family_owned': return `Own ${gate.amount} ${gate.target} upgrades`;
+      case 'upgrade_owned': return `Research ${this.game.byId.upgrade[gate.target]?.name ?? 'a prerequisite'}`;
+      case 'ascensions': return `Reach ascension ${gate.amount}`;
+      default: return '';
+    }
+  }
+
+  upgradeAvailable(upgrade) {
+    return upgrade.requires.every(r => this.state.upgrades.includes(r)) && this.isUnlocked(upgrade.unlock);
+  }
+
+  /* -- presentation ------------------------------------------------------ */
+
+  effectText(effect) {
+    const everything = (effect.target || '*') === '*';
+    const named = kind => {
+      if (everything) return { resource: 'all resources', action: 'all actions', generator: 'all generators' }[kind];
+      return this.game.byId[kind][effect.target]?.name ?? effect.target;
+    };
+    const v = effect.value;
+    switch (effect.kind) {
+      case 'global_mult': return `×${+v.toFixed(3)} to all production`;
+      case 'resource_rate': return `×${+v.toFixed(3)} ${named('resource')} production`;
+      case 'resource_cap': return `×${+v.toFixed(3)} ${named('resource')} storage`;
+      case 'action_yield': return `×${+v.toFixed(3)} output from ${named('action')}`;
+      case 'generator_rate': return `×${+v.toFixed(3)} output from ${named('generator')}`;
+      case 'generator_cost': return `−${((1 - v) * 100).toFixed(0)}% cost for ${named('generator')}`;
+      case 'cooldown': return `−${((1 - v) * 100).toFixed(0)}% cooldown on ${named('action')}`;
+      case 'decay': return `−${((1 - v) * 100).toFixed(0)}% ${named('resource')} decay`;
+      case 'crit_chance': return `+${(v * 100).toFixed(1)}% chance of ×${effect.mult} from ${named('action')}`;
+      case 'start_resource': return `Start each run with ${fmt(v)} ${named('resource')}`;
+      default: return effect.kind;
+    }
+  }
+
+  effectsText(effects) { return effects.map(e => this.effectText(e)).join(' · '); }
+}
+
+/* -- rendering ------------------------------------------------------------ */
+
+const el = (tag, className, text) => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+/**
+ * Reconcile a list by id, updating nodes in place.
+ *
+ * Rebuilding with innerHTML at the tick rate cancels in-progress taps, drops
+ * :active feedback, and resets the upgrade list's scroll position several times a
+ * second. Node identity is load-bearing.
+ */
+function keyedList(container, items, create, update) {
+  const existing = (container._byId ??= new Map());
+  const seen = new Set();
+  items.forEach((item, index) => {
+    seen.add(item.id);
+    let node = existing.get(item.id);
+    if (!node) { node = create(item); node.dataset.id = item.id; existing.set(item.id, node); }
+    update(node, item);
+    if (container.children[index] !== node) container.insertBefore(node, container.children[index] || null);
+  });
+  for (const [id, node] of existing) if (!seen.has(id)) { node.remove(); existing.delete(id); }
+}
+
+function chip(entry, short) {
+  const node = el('span', 'chip' + (short ? ' is-short' : ''));
+  if (entry.color) node.style.setProperty('--res', entry.color);
+  node.appendChild(el('i', 'dot'));
+  node.appendChild(el('span', null, entry.label));
+  return node;
+}
+
+/* -- app ------------------------------------------------------------------ */
+
+const SAVE_KEY = 'incgame.standalone.save';
+let engine = null;
+let tab = 'do';
+
+function bundle(cost) {
+  return Object.entries(cost).map(([id, amount]) => {
+    const resource = engine.game.byId.resource[id];
+    return { id, color: resource.color, label: `${fmt(amount)} ${resource.name}`, have: (engine.state.amounts[id] ?? 0) >= amount };
+  });
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  root.style.setProperty('--accent', theme.accent);
+  root.style.setProperty('--secondary', theme.secondary);
+  root.style.setProperty('--hue', theme.hue);
+}
+
+function renderResources() {
+  const net = engine.netRates();
+  const visible = engine.game.resources.filter(r =>
+    r.tier === 0 || (engine.state.earned[r.id] ?? 0) > 0 || (engine.state.amounts[r.id] ?? 0) > 0);
+
+  keyedList(document.getElementById('resources'), visible,
+    resource => {
+      const node = el('div', 'res');
+      node.style.setProperty('--res', resource.color);
+      node.title = resource.description;
+      node.appendChild(el('div', 'res-name', resource.name));
+      node.appendChild(el('div', 'res-amount'));
+      node.appendChild(el('div', 'res-rate'));
+      const bar = el('div', 'res-bar'); bar.appendChild(el('i')); node.appendChild(bar);
+      return node;
+    },
+    (node, resource) => {
+      const amount = engine.state.amounts[resource.id] ?? 0;
+      const cap = engine.capOf(resource.id);
+      node.querySelector('.res-amount').textContent = fmt(amount);
+      const rate = node.querySelector('.res-rate');
+      rate.textContent = Number.isFinite(cap) ? `${fmtRate(net[resource.id])} · max ${fmt(cap)}` : fmtRate(net[resource.id]);
+      rate.classList.toggle('is-negative', net[resource.id] < -1e-9);
+      const bar = node.querySelector('.res-bar');
+      bar.hidden = !Number.isFinite(cap);
+      if (Number.isFinite(cap)) {
+        const fill = Math.min(1, amount / cap);
+        bar.firstElementChild.style.width = `${(fill * 100).toFixed(1)}%`;
+        node.classList.toggle('is-full', fill >= 0.999);
+      }
+    });
+}
+
+function renderActions() {
+  const now = Date.now() / 1000;
+  const visible = engine.game.actions.filter(a => engine.gateProgress(a.unlock) >= TEASE_THRESHOLD);
+
+  keyedList(document.getElementById('actions'), visible,
+    action => {
+      const node = el('button', 'action');
+      node.type = 'button';
+      node.appendChild(el('div', 'action-name'));
+      node.appendChild(el('div', 'action-desc'));
+      node.appendChild(el('div', 'action-flow'));
+      node.appendChild(el('div', 'lock-gate'));
+      const bar = el('div', 'lock-bar'); bar.appendChild(el('i')); node.appendChild(bar);
+      node.appendChild(el('div', 'action-cool'));
+      node.addEventListener('click', () => { if (!node.disabled) act(node.dataset.id); });
+      return node;
+    },
+    (node, action) => {
+      const unlocked = engine.isUnlocked(action.unlock);
+      const progress = engine.gateProgress(action.unlock);
+      node.querySelector('.action-name').textContent = action.name;
+      node.querySelector('.action-desc').textContent = action.description;
+
+      const flow = node.querySelector('.action-flow');
+      flow.textContent = '';
+      if (unlocked) {
+        const costs = bundle(action.cost);
+        if (costs.length) {
+          costs.forEach(c => flow.appendChild(chip(c, !c.have)));
+          flow.appendChild(el('span', 'action-arrow', '→'));
+        }
+        bundle(engine.actionYield(action)).forEach(o => flow.appendChild(chip(o)));
+      }
+
+      const gate = node.querySelector('.lock-gate'), bar = node.querySelector('.lock-bar');
+      gate.hidden = unlocked; bar.hidden = unlocked;
+      if (!unlocked) {
+        gate.textContent = engine.gateText(action.unlock);
+        bar.firstElementChild.style.width = `${(progress * 100).toFixed(0)}%`;
+      }
+
+      node.classList.toggle('locked', !unlocked);
+      node.classList.toggle('is-primary', unlocked && action.kind === 'click');
+
+      const ready = engine.state.actionReady[action.id] ?? 0;
+      const cooldown = engine.actionCooldown(action);
+      const sweep = node.querySelector('.action-cool');
+      if (cooldown > 0 && ready > now) {
+        sweep.style.width = `${Math.min(100, ((ready - now) / cooldown) * 100).toFixed(1)}%`;
+        node.disabled = true;
+      } else {
+        sweep.style.width = '0%';
+        node.disabled = !unlocked || !engine.canAfford(action.cost);
+      }
+    });
+}
+
+function renderMechanics() {
+  keyedList(document.getElementById('mechanics'), engine.game.mechanics,
+    () => {
+      const node = el('div', 'mech');
+      node.appendChild(el('div', 'mech-kind'));
+      node.appendChild(el('div', 'mech-name'));
+      node.appendChild(el('div', 'mech-desc'));
+      node.appendChild(el('div', 'mech-live'));
+      return node;
+    },
+    (node, mechanic) => {
+      node.querySelector('.mech-kind').textContent = mechanic.kind;
+      node.querySelector('.mech-name').textContent = mechanic.name;
+      node.querySelector('.mech-desc').textContent = mechanic.description;
+      const live = node.querySelector('.mech-live');
+      let text = '';
+      if (mechanic.kind === 'momentum') {
+        const stacks = Math.min(Math.max(0, engine.state.streak - 1), mechanic.params.maxStacks);
+        text = `${stacks} stacks · ×${(1 + mechanic.params.perClick * stacks).toFixed(2)}`;
+      } else if (mechanic.kind === 'resonance') {
+        const until = mechanic.params.everyN - (engine.state.actionCount % mechanic.params.everyN);
+        text = `${until} action${until === 1 ? '' : 's'} to payout`;
+      } else if (mechanic.kind === 'synergy') {
+        const count = engine.state.upgrades.filter(id => engine.game.byId.upgrade[id]?.family === mechanic.params.family).length;
+        text = `${count} ${mechanic.params.family} owned · ×${(1 + mechanic.params.per * count).toFixed(2)}`;
+      } else if (mechanic.kind === 'symbiosis') {
+        text = `×${engine.symbiosisFactor(mechanic.params.resource).toFixed(2)} currently`;
+      }
+      live.hidden = !text;
+      live.textContent = text;
+    });
+}
+
+function renderGenerators() {
+  const { efficiency } = engine.rates();
+  const container = document.getElementById('generators');
+  const visible = engine.game.generators.filter(g =>
+    engine.gateProgress(g.unlock) >= TEASE_THRESHOLD || (engine.state.generators[g.id] ?? 0) > 0);
+
+  if (!visible.length) {
+    container.textContent = '';
+    container._byId = new Map();
+    container.appendChild(el('div', 'empty', 'Nothing to build yet. Keep working — the first one shows up here.'));
+    return;
+  }
+
+  keyedList(container, visible,
+    () => {
+      const node = el('div', 'card');
+      const top = el('div', 'card-top');
+      const left = el('div');
+      left.appendChild(el('div', 'card-name'));
+      left.appendChild(el('div', 'card-sub'));
+      top.appendChild(left);
+      top.appendChild(el('div', 'card-owned'));
+      node.appendChild(top);
+      node.appendChild(el('div', 'card-meta'));
+      node.appendChild(el('div', 'throttle'));
+      node.appendChild(el('div', 'lock-gate'));
+      const bar = el('div', 'lock-bar'); bar.appendChild(el('i')); node.appendChild(bar);
+      const buy = el('div', 'card-buy');
+      const one = el('button', 'btn btn-primary'); one.type = 'button';
+      const max = el('button', 'btn btn-max', 'Max'); max.type = 'button';
+      one.addEventListener('click', () => build(node.dataset.id, 1));
+      max.addEventListener('click', () => build(node.dataset.id, 'max'));
+      buy.append(one, max);
+      node.appendChild(buy);
+      return node;
+    },
+    (node, generator) => {
+      const unlocked = engine.isUnlocked(generator.unlock);
+      const owned = engine.state.generators[generator.id] ?? 0;
+      const each = generator.rate * engine.mult(engine.mods.generatorRate, generator.id);
+      const eff = efficiency[generator.id] ?? 1;
+
+      node.querySelector('.card-name').textContent = generator.name;
+      node.querySelector('.card-sub').textContent = generator.description;
+      const ownedTag = node.querySelector('.card-owned');
+      ownedTag.textContent = `×${owned}`;
+      ownedTag.hidden = owned === 0;
+
+      const meta = node.querySelector('.card-meta');
+      meta.textContent = '';
+      meta.appendChild(el('span', 'chip', `${fmt(each)}/s ${engine.game.byId.resource[generator.resource].name} each`));
+      if (owned > 0) meta.appendChild(el('span', 'chip', `${fmtRate(each * owned * eff)} total`));
+      for (const [id, per] of Object.entries(generator.upkeep)) {
+        meta.appendChild(el('span', 'chip', `eats ${fmt(per)}/s ${engine.game.byId.resource[id].name}`));
+      }
+
+      const throttled = owned > 0 && eff < 0.999;
+      const throttle = node.querySelector('.throttle');
+      throttle.hidden = !throttled;
+      if (throttled) {
+        const feeds = Object.keys(generator.upkeep).map(id => engine.game.byId.resource[id].name).join(', ');
+        throttle.textContent = `Starved — running at ${(eff * 100).toFixed(0)}%. Feed it more ${feeds}.`;
+      }
+      node.classList.toggle('is-throttled', throttled);
+
+      const gate = node.querySelector('.lock-gate'), bar = node.querySelector('.lock-bar'), buy = node.querySelector('.card-buy');
+      gate.hidden = unlocked; bar.hidden = unlocked; buy.hidden = !unlocked;
+      node.classList.toggle('locked', !unlocked);
+      if (!unlocked) {
+        gate.textContent = engine.gateText(generator.unlock);
+        bar.firstElementChild.style.width = `${(engine.gateProgress(generator.unlock) * 100).toFixed(0)}%`;
+        return;
+      }
+
+      const cost = engine.generatorCost(generator.id, 1);
+      const [one, max] = buy.children;
+      one.textContent = `Build · ${fmt(cost)} ${engine.game.byId.resource[generator.costResource].name}`;
+      one.disabled = (engine.state.amounts[generator.costResource] ?? 0) < cost;
+      const affordable = engine.maxAffordable(generator.id);
+      max.textContent = affordable > 1 ? `Max ×${affordable}` : 'Max';
+      max.disabled = affordable < 1;
+    });
+}
+
+function renderUpgrades() {
+  const container = document.getElementById('upgrades');
+  const owned = new Set(engine.state.upgrades);
+  const shown = [], hidden = [];
+
+  for (const upgrade of engine.game.upgrades) {
+    const requirementsMet = upgrade.requires.every(r => owned.has(r));
+    const progress = engine.gateProgress(upgrade.unlock);
+    const entry = { upgrade, owned: owned.has(upgrade.id), requirementsMet, progress,
+      sort: Object.values(upgrade.cost).reduce((a, b) => a + b, 0), id: upgrade.id };
+    if (entry.owned || (requirementsMet && progress >= TEASE_THRESHOLD)) shown.push(entry);
+    else if (!entry.owned) hidden.push(entry);
+  }
+
+  // Never leave the panel empty: surface the nearest few locked upgrades so there
+  // is always a visible next objective.
+  if (!shown.some(e => !e.owned) && hidden.length) {
+    hidden.sort((a, b) => b.progress - a.progress || a.sort - b.sort);
+    shown.push(...hidden.slice(0, 3));
+  }
+  shown.sort((a, b) => Number(a.owned) - Number(b.owned) || a.upgrade.tier - b.upgrade.tier || a.sort - b.sort);
+
+  if (!shown.length) {
+    container.textContent = '';
+    container._byId = new Map();
+    container.appendChild(el('div', 'empty', 'No research available yet.'));
+    return;
+  }
+
+  keyedList(container, shown,
+    () => {
+      const node = el('div', 'card');
+      const top = el('div', 'card-top'), left = el('div');
+      left.appendChild(el('div', 'family'));
+      left.appendChild(el('div', 'card-name'));
+      left.appendChild(el('div', 'card-sub'));
+      top.appendChild(left);
+      node.appendChild(top);
+      node.appendChild(el('div', 'effect'));
+      node.appendChild(el('div', 'card-meta'));
+      node.appendChild(el('div', 'lock-gate'));
+      const bar = el('div', 'lock-bar'); bar.appendChild(el('i')); node.appendChild(bar);
+      const buy = el('div', 'card-buy');
+      const button = el('button', 'btn btn-primary', 'Research'); button.type = 'button';
+      button.addEventListener('click', () => research(node.dataset.id));
+      buy.appendChild(button);
+      node.appendChild(buy);
+      return node;
+    },
+    (node, entry) => {
+      const { upgrade } = entry;
+      node.querySelector('.family').textContent = `${upgrade.family} · tier ${upgrade.tier + 1}`;
+      node.querySelector('.card-name').textContent = upgrade.name;
+      node.querySelector('.card-sub').textContent = upgrade.description;
+      node.querySelector('.effect').textContent = engine.effectsText(upgrade.effects);
+
+      const meta = node.querySelector('.card-meta');
+      meta.textContent = '';
+      bundle(upgrade.cost).forEach(c => meta.appendChild(chip(c, !c.have)));
+
+      const gate = node.querySelector('.lock-gate'), bar = node.querySelector('.lock-bar'), buy = node.querySelector('.card-buy');
+      node.classList.toggle('is-owned', entry.owned);
+
+      if (entry.owned) {
+        gate.hidden = false; gate.textContent = 'Researched';
+        bar.hidden = true; buy.hidden = true;
+        node.classList.remove('locked');
+        return;
+      }
+
+      const missing = upgrade.requires.filter(r => !engine.state.upgrades.includes(r));
+      const unlocked = entry.requirementsMet && entry.progress >= 1;
+      if (!unlocked) {
+        gate.hidden = false;
+        gate.textContent = missing.length
+          ? `Requires ${missing.map(r => engine.game.byId.upgrade[r].name).join(', ')}`
+          : engine.gateText(upgrade.unlock);
+        bar.hidden = false;
+        bar.firstElementChild.style.width = `${(entry.progress * 100).toFixed(0)}%`;
+        buy.hidden = true;
+        node.classList.add('locked');
+        return;
+      }
+
+      gate.hidden = true; bar.hidden = true; buy.hidden = false;
+      node.classList.remove('locked');
+      buy.firstElementChild.disabled = !engine.canAfford(upgrade.cost);
+    });
+}
+
+function renderPrestige() {
+  const head = document.getElementById('prestige-head');
+  const points = engine.prestigePoints();
+
+  if (!head._built) {
+    head._built = true;
+    head.appendChild(el('h2'));
+    head.appendChild(el('p', 'hint'));
+    const nums = el('div', 'prestige-nums');
+    for (const key of ['held', 'points', 'ascensions']) {
+      const box = el('div', 'prestige-num');
+      box.dataset.key = key;
+      box.appendChild(el('div', 'k'));
+      box.appendChild(el('div', 'v'));
+      nums.appendChild(box);
+    }
+    head.appendChild(nums);
+    const button = el('button', 'btn btn-danger btn-wide');
+    button.type = 'button';
+    button.addEventListener('click', ascend);
+    head.appendChild(button);
+  }
+
+  const name = engine.game.prestigeName;
+  head.querySelector('h2').textContent = `Ascend for ${name}`;
+  head.querySelector('.hint').textContent =
+    `Resetting clears this run — resources, buildings, research. You keep ${name} and everything bought with it.`;
+
+  const values = { held: fmt(engine.state.prestigeCurrency), points: fmt(points), ascensions: String(engine.state.ascensions) };
+  const labels = { held: `${name} held`, points: 'Ascend for', ascensions: 'Ascensions' };
+  head.querySelectorAll('.prestige-num').forEach(box => {
+    box.querySelector('.k').textContent = labels[box.dataset.key];
+    box.querySelector('.v').textContent = values[box.dataset.key];
+  });
+
+  const button = head.querySelector('button');
+  button.textContent = points >= 1 ? `Ascend — gain ${fmt(points)} ${name}` : 'Not enough progress yet';
+  button.disabled = points < 1;
+
+  keyedList(document.getElementById('prestige-upgrades'), engine.game.prestigeUpgrades,
+    () => {
+      const node = el('div', 'card');
+      const top = el('div', 'card-top'), left = el('div');
+      left.appendChild(el('div', 'card-name'));
+      left.appendChild(el('div', 'card-sub'));
+      top.appendChild(left);
+      top.appendChild(el('div', 'card-owned'));
+      node.appendChild(top);
+      node.appendChild(el('div', 'effect'));
+      const buy = el('div', 'card-buy');
+      const button = el('button', 'btn btn-primary'); button.type = 'button';
+      button.addEventListener('click', () => buyPermanent(node.dataset.id));
+      buy.appendChild(button);
+      node.appendChild(buy);
+      return node;
+    },
+    (node, upgrade) => {
+      const level = engine.state.prestigeLevels[upgrade.id] ?? 0;
+      const maxed = level >= upgrade.maxLevel;
+      const cost = upgrade.baseCost * Math.pow(upgrade.costGrowth, level);
+      node.querySelector('.card-name').textContent = upgrade.name;
+      node.querySelector('.card-sub').textContent = upgrade.description;
+      node.querySelector('.effect').textContent = engine.effectsText(upgrade.effects);
+      node.querySelector('.card-owned').textContent =
+        upgrade.maxLevel > 1 ? `${level}/${upgrade.maxLevel}` : (level ? '✓' : '—');
+      const button = node.querySelector('button');
+      button.textContent = maxed ? 'Maxed' : `Buy · ${fmt(cost)}`;
+      button.disabled = maxed || engine.state.prestigeCurrency < cost;
+      node.classList.toggle('is-owned', maxed);
+    });
+}
+
+function renderBadges() {
+  const badges = {
+    build: engine.game.generators.some(g => engine.isUnlocked(g.unlock)
+      && (engine.state.amounts[g.costResource] ?? 0) >= engine.generatorCost(g.id, 1)),
+    research: engine.game.upgrades.some(u => !engine.state.upgrades.includes(u.id)
+      && engine.upgradeAvailable(u) && engine.canAfford(u.cost)),
+    ascend: engine.prestigePoints() >= 1 || engine.game.prestigeUpgrades.some(p => {
+      const level = engine.state.prestigeLevels[p.id] ?? 0;
+      return level < p.maxLevel && engine.state.prestigeCurrency >= p.baseCost * Math.pow(p.costGrowth, level);
+    }),
+  };
+  document.querySelectorAll('.tab').forEach(t => {
+    const badge = t.querySelector('.badge');
+    if (badge) badge.hidden = !badges[t.dataset.tab];
+  });
+}
+
+function renderStats() {
+  const rows = [
+    ['Playtime', fmtDuration(engine.state.playtime)],
+    ['Actions', engine.state.actionCount],
+    ['Research', engine.state.upgrades.length],
+    ['Buildings', Object.values(engine.state.generators).reduce((a, b) => a + b, 0)],
+    ['Ascensions', engine.state.ascensions],
+    ['Best ascend', fmt(engine.state.bestPoints)],
+  ];
+  const container = document.getElementById('menu-stats');
+  container.textContent = '';
+  for (const [key, value] of rows) {
+    const row = el('div');
+    row.appendChild(el('span', null, key));
+    row.appendChild(el('b', null, String(value)));
+    container.appendChild(row);
+  }
+}
+
+function render() {
+  renderResources();
+  if (tab === 'do') { renderActions(); renderMechanics(); }
+  else if (tab === 'build') renderGenerators();
+  else if (tab === 'research') renderUpgrades();
+  else if (tab === 'ascend') renderPrestige();
+  renderBadges();
+}
+
+/* -- interaction ---------------------------------------------------------- */
+
+function toast(text, kind) {
+  const container = document.getElementById('toasts');
+  // A fast clicker outruns the removal timer; an unbounded column would cover the
+  // buttons being clicked.
+  while (container.children.length >= 4) container.firstElementChild.remove();
+  const node = el('div', 'toast' + (kind ? ` is-${kind}` : ''), text);
+  container.appendChild(node);
+  setTimeout(() => node.remove(), 1450);
+}
+
+function act(id) {
+  const result = engine.doAction(id);
+  if (result.ok) {
+    const gained = Object.entries(result.gained)
+      .map(([rid, amount]) => `+${fmt(amount)} ${engine.game.byId.resource[rid].name}`).join('  ');
+    if (result.crit) toast(`×${result.multiplier.toFixed(1)}!  ${gained}`, 'crit');
+    else if (result.multiplier > 1.15) toast(`×${result.multiplier.toFixed(2)}  ${gained}`, 'good');
+    else if (gained) toast(gained);
+    if (result.cascade) toast(`${result.cascade.name} fired free`, 'crit');
+  } else if (result.reason !== 'cooling down') {
+    toast(result.reason, 'bad');
+  }
+  render();
+}
+
+function build(id, count) {
+  const result = engine.buyGenerator(id, count);
+  toast(result.ok ? `Built ×${result.bought}` : result.reason, result.ok ? 'good' : 'bad');
+  render();
+}
+
+function research(id) {
+  const result = engine.buyUpgrade(id);
+  toast(result.ok ? `Researched ${result.name}` : result.reason, result.ok ? 'good' : 'bad');
+  render();
+}
+
+function buyPermanent(id) {
+  const result = engine.buyPrestigeUpgrade(id);
+  toast(result.ok ? 'Permanent upgrade bought' : result.reason, result.ok ? 'good' : 'bad');
+  render();
+}
+
+function ascend() {
+  const points = engine.prestigePoints();
+  if (points < 1) return;
+  const name = engine.game.prestigeName;
+  if (!confirm(`Ascend now?\n\nThis clears the run and grants ${fmt(points)} ${name}.`)) return;
+  const result = engine.prestige();
+  if (result.ok) { toast(`Ascended — +${fmt(result.points)} ${name}`, 'crit'); showTab('do'); }
+  save();
+  render();
+}
+
+function showTab(name) {
+  tab = name;
+  document.querySelectorAll('.panel').forEach(p => (p.hidden = p.dataset.tab !== name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('is-active', t.dataset.tab === name));
+  render();
+}
+
+/* -- persistence ---------------------------------------------------------- */
+
+/** A save is a seed plus progress; the content is regenerated on load. */
+function save() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      v: 1, seed: engine.game.seed, savedAt: Date.now() / 1000, progress: engine.state,
+    }));
+  } catch (err) {
+    // A full quota is not something the player can act on mid-run; the next
+    // autosave retries.
+  }
+}
+
+function load() {
+  const raw = localStorage.getItem(SAVE_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    if (data.v !== 1 || typeof data.seed !== 'number') return null;
+    const game = generateGame(data.seed);
+    const state = data.progress;
+    // Drop ids this build no longer generates rather than crashing on them.
+    state.upgrades = (state.upgrades || []).filter(id => game.byId.upgrade[id]);
+    for (const id of Object.keys(state.generators || {})) if (!game.byId.generator[id]) delete state.generators[id];
+    for (const resource of game.resources) state.amounts[resource.id] ??= 0;
+    // Cooldowns are deliberately not restored: returning to find yesterday's
+    // buttons still cooling down is annoyance with no design value.
+    state.actionReady = {};
+    state.updatedAt = data.savedAt || Date.now() / 1000;
+    return new Engine(game, state);
+  } catch (err) {
+    return null;
+  }
+}
+
+function start(seed) {
+  engine = new Engine(generateGame(seed));
+  localStorage.removeItem(SAVE_KEY);
+  mount();
+  save();
+}
+
+function mount() {
+  applyTheme(engine.game.theme);
+  document.getElementById('run-title').textContent = engine.game.title;
+  document.getElementById('run-flavor').textContent = engine.game.flavor;
+  document.getElementById('menu-seed').textContent = String(engine.game.seed);
+  document.title = `${engine.game.title} — incremental`;
+  // A new world clears every list so nothing from the previous run survives.
+  ['resources', 'actions', 'mechanics', 'generators', 'upgrades', 'prestige-upgrades'].forEach(id => {
+    const node = document.getElementById(id);
+    node.textContent = '';
+    node._byId = new Map();
+  });
+  render();
+}
+
+/* -- boot ----------------------------------------------------------------- */
+
+function randomSeed() { return Math.floor(Math.random() * 2147483646) + 1; }
+
+engine = load() || new Engine(generateGame(randomSeed()));
+mount();
+
+// Offline production is credited from the save timestamp on the first advance.
+const offline = engine.advance();
+if (offline > 60) toast(`Welcome back — ${fmtDuration(offline)} of production collected`, 'good');
+render();
+
+setInterval(() => { engine.advance(); render(); }, 250);
+setInterval(save, 10000);
+window.addEventListener('pagehide', save);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { engine.advance(); render(); } else { save(); }
+});
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+// Keyboard play on desktop: 1-9 fire the unlocked actions in order.
+document.addEventListener('keydown', event => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (document.activeElement?.tagName === 'INPUT') return;
+  const index = Number(event.key) - 1;
+  if (!Number.isInteger(index) || index < 0) return;
+  const unlocked = engine.game.actions.filter(a => engine.isUnlocked(a.unlock));
+  if (unlocked[index]) { event.preventDefault(); act(unlocked[index].id); }
+});
+
+const menu = document.getElementById('menu');
+document.getElementById('btn-menu').addEventListener('click', () => { renderStats(); menu.showModal(); });
+document.getElementById('btn-close-menu').addEventListener('click', () => menu.close());
+
+document.getElementById('btn-copy-seed').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(String(engine.game.seed)); toast('Seed copied', 'good'); }
+  catch (err) { toast(`Seed: ${engine.game.seed}`); }
+});
+
+document.getElementById('btn-export').addEventListener('click', async () => {
+  const text = localStorage.getItem(SAVE_KEY) || '';
+  try { await navigator.clipboard.writeText(text); toast('Save copied to clipboard', 'good'); }
+  catch (err) {
+    // Clipboard is unavailable in some contexts; a download always works.
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `incgame-${engine.game.seed}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+});
+
+document.getElementById('btn-import').addEventListener('click', () => {
+  const text = prompt('Paste a save:');
+  if (!text) return;
+  try {
+    JSON.parse(text);
+    localStorage.setItem(SAVE_KEY, text);
+    const restored = load();
+    if (!restored) throw new Error('save did not load');
+    engine = restored;
+    mount();
+    menu.close();
+    toast('Save loaded', 'good');
+  } catch (err) {
+    toast(`Import failed: ${err.message}`, 'bad');
+  }
+});
+
+document.getElementById('btn-new').addEventListener('click', () => {
+  const raw = document.getElementById('menu-new-seed').value.trim();
+  const seed = raw === '' ? randomSeed() : Number(raw);
+  if (!Number.isFinite(seed)) { toast('Seed must be a number', 'bad'); return; }
+  if (!confirm('Generate a new world? The current run is discarded.')) return;
+  start(Math.floor(Math.abs(seed)) || randomSeed());
+  menu.close();
+  showTab('do');
+  toast('New world generated', 'good');
+});
+</script>
