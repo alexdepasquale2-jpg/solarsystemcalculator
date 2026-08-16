@@ -1,0 +1,17 @@
+{
+  "name": "incgame",
+  "install": "python3 -m pip install -e \".[dev]\"",
+  "terminals": [
+    {
+      "name": "game server",
+      "command": "python3 -m incgame serve --host 0.0.0.0",
+      "description": "incgame HTTP server (JSON API + static frontend) on port 8000. Open the forwarded port or http://127.0.0.1:8000 to play."
+    }
+  ],
+  "ports": [
+    {
+      "name": "game server",
+      "port": 8000
+    }
+  ]
+}
