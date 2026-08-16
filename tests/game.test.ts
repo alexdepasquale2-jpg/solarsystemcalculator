@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { formatNumber } from '../src/utils/format';
 import { canMergeReapers, mergeReapers, getReaperPower } from '../src/game/reapers';
 import { getUpgradeCost } from '../src/game/upgrades';
 import type { Reaper } from '../src/game/reapers';
+import {
+  canMergeItems,
+  createItem,
+  findEmptySlot,
+  mergeItems,
+  packUsed,
+} from '../src/game/backpack';
+import { getPlanetNodes, getStarterNode } from '../src/game/locations';
 
 describe('formatNumber', () => {
   it('formats small numbers', () => {
@@ -70,5 +78,34 @@ describe('upgrade costs', () => {
     expect(getUpgradeCost(upgrade, 0)).toBe(100);
     expect(getUpgradeCost(upgrade, 1)).toBe(150);
     expect(getUpgradeCost(upgrade, 5)).toBeGreaterThan(150);
+  });
+});
+
+describe('backpack', () => {
+  it('finds empty slots and tracks used space', () => {
+    const items = [createItem('soul_shard', 1, 0), createItem('ash_vial', 1, 2)];
+    expect(findEmptySlot(items, 4)).toBe(1);
+    expect(packUsed(items)).toBe(2);
+  });
+
+  it('merges matching relics to the next tier', () => {
+    const a = createItem('bone_charm', 1, 0);
+    const b = createItem('bone_charm', 1, 1);
+    expect(canMergeItems(a, b)).toBe(true);
+    expect(mergeItems(a, b).tier).toBe(2);
+  });
+
+  it('refuses to merge different relics', () => {
+    const a = createItem('bone_charm', 1, 0);
+    const b = createItem('soul_shard', 1, 1);
+    expect(canMergeItems(a, b)).toBe(false);
+  });
+});
+
+describe('world nodes', () => {
+  it('gives every planet a walkable starting site', () => {
+    const start = getStarterNode('terra_mortis');
+    expect(start.unlockSouls).toBe(0);
+    expect(getPlanetNodes('terra_mortis').length).toBeGreaterThanOrEqual(5);
   });
 });
