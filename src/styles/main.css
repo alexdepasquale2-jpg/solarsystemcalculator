@@ -1031,7 +1031,7 @@ html, body {
   inset: 0;
   background: linear-gradient(90deg, var(--accent-purple), var(--accent-gold));
   width: calc(var(--p, 0) * 100%);
-  opacity: 0.35;
+  opacity: 0.55;
 }
 
 .rummage-btn.holding {

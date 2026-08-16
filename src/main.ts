@@ -11,7 +11,7 @@ import {
   packUsed,
   type PackItem,
 } from './game/backpack';
-import { getPlanetNodes, type WorldNode } from './game/locations';
+import { getNode, getPlanetNodes, type WorldNode } from './game/locations';
 import { formatNumber, formatTime } from './utils/format';
 import { floatText, shake, spawnLootToast, spawnRipple, triggerHaptic } from './ui/fx';
 
@@ -205,14 +205,13 @@ function renderPackTab(): string {
         }).join('')}
       </div>
       <div class="pack-bonus">Equipped: +${Math.round(bonuses.tap * 100)}% tap · +${Math.round(bonuses.idle * 100)}% idle · +${Math.round(bonuses.loot * 100)}% loot</div>
+      ${selected ? renderItemSheet(selected) : '<div class="pack-hint">Tap a relic to crush or equip. Drag to merge matching tiers.</div>'}
       <div class="pack-grid ${fullness > 0.85 ? 'strained' : ''}" id="pack-grid" style="grid-template-columns:repeat(${GRID_COLS},1fr)">
         ${Array.from({ length: cap }, (_, slot) => {
           const item = engine.packItems.find((it) => it.slot === slot);
           return renderPackSlot(slot, item);
         }).join('')}
       </div>
-      <div class="pack-hint">Drag to move. Drop same relics to merge. Idle reapers fill empty pockets.</div>
-      ${selected ? renderItemSheet(selected) : ''}
       <div class="harvest-actions">
         <button class="btn" id="btn-crush-shards" type="button">Crush all shards</button>
       </div>
@@ -555,11 +554,14 @@ function bindExplore(): void {
         triggerHaptic('light');
         return;
       }
+      const dest = getNode(id);
       const ok = engine.travelTo(id);
-      if (ok) {
+      if (ok && dest) {
+        spawnLootToast('🗺️', `Walking to ${dest.name}`);
         triggerHaptic('medium');
         shake(document.getElementById('world-map'), 160);
-      } else {
+      } else if (dest && !engine.discoveredNodeIds.includes(dest.id)) {
+        spawnLootToast('❔', `Need ${formatNumber(dest.unlockSouls)} souls to scout`);
         triggerHaptic('light');
       }
     });
@@ -568,21 +570,25 @@ function bindExplore(): void {
   const rummage = document.getElementById('rummage-btn');
   const ring = document.getElementById('rummage-ring');
   if (rummage) {
-    const start = () => {
+    const start = (e: PointerEvent) => {
+      rummage.setPointerCapture(e.pointerId);
       rummageStarted = Date.now();
       rummage.classList.add('holding');
+      rummage.querySelector('span:last-child')!.textContent = 'Rummaging...';
       rummageTimer = window.setInterval(() => {
-        const p = Math.min(1, (Date.now() - rummageStarted) / 1100);
-        if (ring) ring.style.setProperty('--p', String(p));
-        if (p >= 1) {
-          finishRummage();
+        const p = Math.min(1, (Date.now() - rummageStarted) / 900);
+        if (ring) {
+          ring.style.setProperty('--p', String(p));
+          ring.style.width = `${Math.round(p * 100)}%`;
         }
+        if (p >= 1) finishRummage();
       }, 40);
     };
     const cancel = () => {
       if (rummageTimer) clearInterval(rummageTimer);
       rummageTimer = null;
       rummage.classList.remove('holding');
+      rummage.querySelector('span:last-child')!.textContent = 'Hold to rummage';
       if (ring) ring.style.setProperty('--p', '0');
     };
     const finishRummage = () => {
@@ -594,10 +600,9 @@ function bindExplore(): void {
     };
     rummage.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      start();
+      start(e as PointerEvent);
     });
     rummage.addEventListener('pointerup', cancel);
-    rummage.addEventListener('pointerleave', cancel);
     rummage.addEventListener('pointercancel', cancel);
   }
 }
@@ -605,11 +610,6 @@ function bindExplore(): void {
 function bindPack(): void {
   document.querySelectorAll('.pack-slot.filled').forEach((el) => {
     const btn = el as HTMLElement;
-    btn.addEventListener('click', () => {
-      if (dragging) return;
-      selectedItemUid = btn.dataset.item ?? null;
-      render();
-    });
     btn.addEventListener('pointerdown', (e) => beginDrag(e as PointerEvent, btn));
   });
 
@@ -676,6 +676,7 @@ function beginDrag(e: PointerEvent, btn: HTMLElement): void {
       triggerHaptic('light');
     }
     if (ghost) {
+      ghost.style.pointerEvents = 'none';
       ghost.style.left = `${ev.clientX - 28}px`;
       ghost.style.top = `${ev.clientY - 28}px`;
     }
@@ -684,10 +685,15 @@ function beginDrag(e: PointerEvent, btn: HTMLElement): void {
   const end = (ev: PointerEvent) => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', end);
-    ghost?.remove();
     btn.classList.remove('ghosted');
-    if (!dragging) return;
+    if (!dragging) {
+      selectedItemUid = uid;
+      render();
+      return;
+    }
     dragging = false;
+    ghost?.remove();
+    ghost = null;
     const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
     const slotEl = under?.closest('[data-slot]') as HTMLElement | null;
     const equipEl = under?.closest('[data-equip]') as HTMLElement | null;
