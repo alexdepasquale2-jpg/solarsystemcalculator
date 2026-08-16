@@ -99,6 +99,28 @@ export const UPGRADES: Upgrade[] = [
     maxLevel: 1,
     effectPerLevel: 1,
   },
+  {
+    id: 'pack_webbing',
+    name: 'Pack Webbing',
+    description: '+5 backpack slots',
+    icon: '🎒',
+    category: 'idle',
+    baseCost: 400,
+    costMultiplier: 2.2,
+    maxLevel: 4,
+    effectPerLevel: 5,
+  },
+  {
+    id: 'lucky_pockets',
+    name: 'Lucky Pockets',
+    description: '+8% loot find while exploring',
+    icon: '🍀',
+    category: 'idle',
+    baseCost: 350,
+    costMultiplier: 1.75,
+    maxLevel: 20,
+    effectPerLevel: 0.08,
+  },
 ];
 
 export function getUpgradeCost(upgrade: Upgrade, currentLevel: number): number {
