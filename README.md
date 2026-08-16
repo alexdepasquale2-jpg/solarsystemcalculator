@@ -6,14 +6,16 @@ An incremental soul-harvesting clicker merge game for Android. Harvest souls fro
 
 ## Game Features
 
-- **Tap to Harvest** — Click the planet orb to collect souls
+- **Open Explore Maps** — Walk each planet, scout hidden sites, and harvest from groves, ruins, and rifts
+- **Interactive Backpack** — Drag relics, merge tiers, equip bonuses, crush shards; idle reapers fill empty pockets
+- **Tactile Feedback** — Press, rummage-hold, ripples, screen shake, and haptics
 - **9 Bizarre Planets** — From Terra Mortis to the Void Palace, each with unique soul types
 - **Reaper Merge System** — Summon and merge reapers through 10 tiers (Wisp → Void Reaper)
 - **WoW-Inspired Classes** — Soul Warlock, Necromancer, Death Knight, Soul Priest
-- **Upgrade Tree** — Tap mastery, soul magnets, merge catalysts, and more
+- **Upgrade Tree** — Tap mastery, pack webbing, lucky pockets, merge catalysts, and more
 - **Void Ascension** — Prestige system for permanent multipliers
 - **Simulated .io Multiplayer** — 50 AI players on leaderboards, global chat, and rotating world events
-- **Offline Progress** — Earn souls while away (up to 8 hours)
+- **Offline Progress** — Earn souls and backpack loot while away
 
 ## Tech Stack
 
