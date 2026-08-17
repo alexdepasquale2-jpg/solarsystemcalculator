@@ -1285,41 +1285,67 @@ html, body {
   75% { transform: translateX(3px); }
 }
 
-#install-banner {
+#install-gate {
   position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: calc(72px + var(--safe-bottom));
-  z-index: 60;
+  inset: 0;
+  z-index: 80;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #1a1028f2;
-  border: 1px solid var(--border-glow);
-  border-radius: 14px;
+  justify-content: center;
+  padding: 24px;
+  padding-top: calc(24px + var(--safe-top));
+  padding-bottom: calc(24px + var(--safe-bottom));
+  background: radial-gradient(circle at 50% 20%, #2a1450, var(--bg-deep) 62%);
+}
+
+#install-gate[hidden] {
+  display: none !important;
+}
+
+.install-card {
+  width: min(360px, 100%);
+  text-align: center;
+}
+
+.install-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  box-shadow: 0 8px 28px rgba(155, 48, 255, 0.35);
+}
+
+.install-card h1 {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  margin: 16px 0 8px;
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-gold));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.install-lead {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin-bottom: 20px;
+}
+
+.install-card .btn {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 1rem;
+  margin-bottom: 10px;
+}
+
+.install-hint {
+  min-height: 2.4em;
+  color: var(--accent-gold);
   font-size: 0.78rem;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  line-height: 1.4;
 }
 
-#install-banner span {
-  flex: 1;
-}
-
-#install-banner button {
-  border: 1px solid var(--border);
-  background: linear-gradient(135deg, #4a1a6b, #6b3fa0);
-  color: #fff;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-weight: 600;
-}
-
-#btn-install-dismiss {
-  background: transparent !important;
-  border: none !important;
-  font-size: 1.2rem;
-  padding: 4px 8px !important;
+.install-hint.pulse {
+  animation: pulse 1.2s ease-in-out infinite;
 }
 
 #rotate-gate {
@@ -1361,11 +1387,11 @@ html, body {
 }
 
 @media (display-mode: standalone) {
-  #install-banner {
-    display: none;
+  #install-gate {
+    display: none !important;
   }
 }
 
-.native-app #install-banner {
-  display: none;
+.native-app #install-gate {
+  display: none !important;
 }

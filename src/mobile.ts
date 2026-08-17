@@ -28,10 +28,8 @@ export function getInstallHint(isNative = false): InstallHint {
   return 'desktop';
 }
 
-export function shouldShowInstallBanner(isNative = false, dismissed = false): boolean {
-  if (dismissed || isNative) return false;
-  const hint = getInstallHint(isNative);
-  return hint === 'android' || hint === 'ios';
+export function shouldShowInstallBanner(isNative = false, dismissed = false, standalone = false): boolean {
+  return !isNative && !dismissed && !standalone;
 }
 
 export async function bootMobile(): Promise<void> {
@@ -42,7 +40,7 @@ export async function bootMobile(): Promise<void> {
   bindWakeLock();
   await bootNativeShell();
   registerServiceWorker();
-  mountInstallBanner();
+  mountInstallGate();
 }
 
 function lockPortrait(): void {
@@ -168,36 +166,60 @@ function registerServiceWorker(): void {
   });
 }
 
-function mountInstallBanner(): void {
+function mountInstallGate(): void {
   const native = document.documentElement.classList.contains('native-app');
   const dismissed = localStorage.getItem(INSTALL_DISMISS_KEY) === '1';
-  if (!shouldShowInstallBanner(native, dismissed)) return;
+  const gate = document.getElementById('install-gate');
+  const hint = document.getElementById('install-hint');
+  const installBtn = document.getElementById('btn-install-app');
+  const playBtn = document.getElementById('btn-play-browser');
+  if (!gate || !installBtn || !playBtn) return;
 
-  const hint = getInstallHint(native);
-  const banner = document.createElement('div');
-  banner.id = 'install-banner';
-  banner.innerHTML =
-    hint === 'ios'
-      ? `<span>Install: tap Share, then Add to Home Screen</span><button type="button" id="btn-install-dismiss" aria-label="Dismiss">×</button>`
-      : `<span>Install Soul Harvest on your phone</span><button type="button" id="btn-install">Add</button><button type="button" id="btn-install-dismiss" aria-label="Dismiss">×</button>`;
-  document.body.appendChild(banner);
+  const hide = (persist: boolean): void => {
+    gate.hidden = true;
+    if (persist) localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+  };
 
-  let deferred: BeforeInstallPromptEvent | null = null;
+  if (!shouldShowInstallBanner(native, dismissed, isStandaloneDisplay())) {
+    hide(false);
+    return;
+  }
+
+  const kind = getInstallHint(native);
+  gate.hidden = false;
+  if (hint) {
+    hint.textContent =
+      kind === 'ios'
+        ? 'iPhone: tap Install, then Share → Add to Home Screen.'
+        : kind === 'android'
+          ? 'Android: tap Install, then Add to Home Screen.'
+          : 'Tap Install to add Soul Harvest like an app.';
+  }
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
-    deferred = e;
-    banner.hidden = false;
+    window.__shInstall = e;
+  });
+  window.addEventListener('appinstalled', () => hide(true));
+
+  installBtn.addEventListener('click', async () => {
+    const promptEvent = window.__shInstall;
+    if (promptEvent) {
+      await promptEvent.prompt();
+      window.__shInstall = null;
+      hide(true);
+      return;
+    }
+    if (kind === 'ios' && hint) {
+      hint.textContent = 'Tap the Share button, then Add to Home Screen.';
+      hint.classList.add('pulse');
+      return;
+    }
+    if (hint) {
+      hint.textContent = 'Use your browser menu → Install app / Add to Home Screen.';
+      hint.classList.add('pulse');
+    }
   });
 
-  document.getElementById('btn-install')?.addEventListener('click', async () => {
-    if (deferred) {
-      await deferred.prompt();
-      deferred = null;
-    }
-    banner.remove();
-  });
-  document.getElementById('btn-install-dismiss')?.addEventListener('click', () => {
-    localStorage.setItem(INSTALL_DISMISS_KEY, '1');
-    banner.remove();
-  });
+  playBtn.addEventListener('click', () => hide(true));
 }

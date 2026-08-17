@@ -7,9 +7,14 @@ describe('mobile install targeting', () => {
     expect(getInstallHint(true)).toBe('native');
   });
 
-  it('hides the install banner in native apps and after dismiss', () => {
-    expect(shouldShowInstallBanner(true, false)).toBe(false);
-    expect(shouldShowInstallBanner(false, true)).toBe(false);
+  it('hides the install gate in native apps, standalone, and after dismiss', () => {
+    expect(shouldShowInstallBanner(true, false, false)).toBe(false);
+    expect(shouldShowInstallBanner(false, true, false)).toBe(false);
+    expect(shouldShowInstallBanner(false, false, true)).toBe(false);
+  });
+
+  it('shows the install gate for a first visit in the browser', () => {
+    expect(shouldShowInstallBanner(false, false, false)).toBe(true);
   });
 
   it('does not crash device checks in jsdom', () => {

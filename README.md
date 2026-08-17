@@ -8,11 +8,13 @@ Play it as an installable home-screen app (PWA) on iPhone and Android, or wrap i
 
 ## Play on your phone
 
-1. Open the game in **Safari** (iPhone) or **Chrome** (Android).
-2. Add it to your Home Screen:
-   - **iPhone:** Share → Add to Home Screen
-   - **Android:** menu → Install app / Add to Home Screen
-3. Launch Soul Harvest from the icon. It opens fullscreen, portrait, with haptics on supported devices.
+Hosted game: **https://alexdepasquale2-jpg.github.io/solarsystemcalculator/**
+
+1. Open that link on your phone.
+2. Tap **Install**.
+3. Launch Soul Harvest from the new home-screen icon.
+
+If GitHub Pages is not enabled yet: repo **Settings → Pages → Deploy from a branch → `gh-pages` / root → Save**. After that the URL above is the permanent one-tap install.
 
 Local development:
 
@@ -22,8 +24,6 @@ npm run dev        # http://localhost:5173 — use your computer's LAN IP on the
 npm run preview    # production build on http://localhost:4173
 npm test
 ```
-
-On the same Wi-Fi, open `http://<your-computer-ip>:5173` from your phone.
 
 ## Game Features
 
