@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "agent": "tsx scripts/cursor-agent.ts",
     "cap:sync": "npm run build && npx cap sync android",
     "cap:open": "npx cap open android"
   },
@@ -19,6 +20,9 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0",
+    "@cursor/sdk": "^1.0.28",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vitest": "^3.0.5"

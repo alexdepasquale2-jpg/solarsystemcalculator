@@ -30,6 +30,32 @@ npm run build      # Production build
 npm test           # Run unit tests
 ```
 
+## Cursor SDK
+
+`scripts/cursor-agent.ts` runs Cursor agents against this repo via `@cursor/sdk`. Requires Node 22.13+ and a `CURSOR_API_KEY` from [Cursor Dashboard → Integrations](https://cursor.com/dashboard/integrations) (or a team service-account key).
+
+```bash
+export CURSOR_API_KEY="cursor_..."
+
+# One-shot (create, run, dispose)
+npm run agent -- prompt "Summarize the harvest loop in src/game/engine.ts"
+
+# Durable local run with streaming
+npm run agent -- send --runtime local "Add a new planet after the last one"
+
+# Cloud run that opens a PR when finished
+npm run agent -- send --runtime cloud --pr "Balance reaper merge costs"
+
+# Follow-up on an existing agent (bc- ids are cloud)
+npm run agent -- resume <agentId> "Also update the README"
+
+# Inspect
+npm run agent -- models
+npm run agent -- list --runtime local
+```
+
+`--runtime` is always set explicitly (`local` or `cloud`). Local runs against `--cwd`; cloud clones `--repo` at `--ref`. In GitHub Actions, `--ci` (or `GITHUB_ACTIONS`) sets `skipReviewerRequest`. Manual dispatch: **Actions → Cursor Agent**.
+
 ## Android Build
 
 Requires Android Studio with SDK 34+:
@@ -59,6 +85,8 @@ src/
   utils/
     format.ts          # Number formatting
   main.ts              # UI rendering & event binding
+scripts/
+  cursor-agent.ts      # Cursor SDK CLI (local + cloud agents)
 ```
 
 ## License
