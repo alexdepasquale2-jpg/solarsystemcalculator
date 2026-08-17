@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0612" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Soul Harvest" />
+  <meta name="application-name" content="Soul Harvest" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>Soul Harvest</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    window.__shInstall = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      window.__shInstall = e;
+    });
+  </script>
+  <script type="module" crossorigin src="./assets/index-CrGFAX4t.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-B7r9W6d8.css">
+</head>
+<body>
+  <div id="rotate-gate">
+    <div>
+      <div class="rotate-icon">📱</div>
+      <p>Rotate your phone to play Soul Harvest</p>
+    </div>
+  </div>
+  <div id="install-gate" hidden>
+    <div class="install-card">
+      <img class="install-icon" src="./icons/icon-192.png" width="96" height="96" alt="Soul Harvest" />
+      <h1>Soul Harvest</h1>
+      <p class="install-lead">Install the game on this phone — one tap, then open it from your home screen.</p>
+      <button type="button" class="btn btn-gold" id="btn-install-app">Install</button>
+      <button type="button" class="btn" id="btn-play-browser">Play in browser</button>
+      <p class="install-hint" id="install-hint"></p>
+    </div>
+  </div>
+  <div id="app">
+    <div id="loading-screen">
+      <div class="loading-content">
+        <div class="loading-icon">☠️</div>
+        <h1>Soul Harvest</h1>
+        <p>Harvesting souls from bizarre planets...</p>
+        <div class="loading-bar"><div class="loading-fill"></div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
