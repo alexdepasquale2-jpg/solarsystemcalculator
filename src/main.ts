@@ -14,6 +14,7 @@ import {
 import { getNode, getPlanetNodes, type WorldNode } from './game/locations';
 import { formatNumber, formatTime } from './utils/format';
 import { floatText, shake, spawnLootToast, spawnRipple, triggerHaptic } from './ui/fx';
+import { bootMobile } from './mobile';
 
 const engine = getGameEngine();
 let currentTab = 'explore';
@@ -24,6 +25,7 @@ let rummageTimer: number | null = null;
 let rummageStarted = 0;
 
 function init(): void {
+  void bootMobile();
   setTimeout(() => {
     document.getElementById('loading-screen')?.classList.add('hidden');
     render();
@@ -55,6 +57,9 @@ function init(): void {
     });
 
     setInterval(() => engine.save(), 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') engine.save();
+    });
   }, 1200);
 }
 
@@ -530,6 +535,7 @@ function bindExplore(): void {
   const orb = document.getElementById('harvest-orb');
   if (orb) {
     orb.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
       const ev = e as PointerEvent;
       const rect = orb.getBoundingClientRect();
       const x = ev.clientX - rect.left;
@@ -602,6 +608,13 @@ function bindExplore(): void {
       e.preventDefault();
       start(e as PointerEvent);
     });
+    rummage.addEventListener(
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+      },
+      { passive: false }
+    );
     rummage.addEventListener('pointerup', cancel);
     rummage.addEventListener('pointercancel', cancel);
   }
@@ -659,6 +672,8 @@ function bindPack(): void {
 function beginDrag(e: PointerEvent, btn: HTMLElement): void {
   const uid = btn.dataset.item;
   if (!uid) return;
+  e.preventDefault();
+  btn.setPointerCapture(e.pointerId);
   const startX = e.clientX;
   const startY = e.clientY;
   let ghost: HTMLElement | null = null;
