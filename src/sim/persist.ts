@@ -9,7 +9,7 @@ import { Field } from "./field";
  * carries wall-clock time, so reopening can charge you for the hours you were gone.
  */
 
-const VERSION = 1;
+const VERSION = 2;
 
 function encodeField(f: Field): string {
   const bytes = new Uint8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength);
@@ -41,6 +41,13 @@ const FIELDS = (w: World): Record<string, Field> => ({
   hardness: w.hydro.hardness,
   biomass: w.forage.biomass,
   sterile: w.forage.sterile,
+  shelter: w.shelter,
+  claimSum: w.claimSum,
+  claimWeight: w.claimWeight,
+  flame: w.fire.flame,
+  ash: w.fire.ash,
+  lastBurn: w.fire.lastBurn,
+  dust: w.aeolian.dust,
 });
 
 export function serialize(world: World): string {

@@ -1,7 +1,8 @@
 import { World } from "../sim/world";
 import { Camera } from "./camera";
+import { Kind } from "../sim/bodies";
 
-export type Overlay = "none" | "heat" | "water" | "wear" | "forage" | "border";
+export type Overlay = "none" | "heat" | "water" | "wear" | "forage" | "border" | "fire" | "claim";
 
 /**
  * Drawing.
@@ -43,6 +44,8 @@ export class Renderer {
         const shade = Math.max(0.48, Math.min(1.34, 1 - (gx * 2.6 + gy * 2.0) * 4.2));
 
         const bio = Math.min(1, w.forage.biomass.data[i]);
+        const ash = Math.min(1, w.fire.ash.data[i]);
+        const built = Math.min(1, w.shelter.data[i] * 2.4);
         // Everything is damp; only standing water should read as water.
         const wet = Math.max(0, Math.min(1, (w.hydro.water.data[i] - 0.11) / 0.30));
         const worn = Math.min(1, w.wear.data[i] * 1.6);
@@ -61,7 +64,38 @@ export class Renderer {
           b = b * (1 - t) + (104 + 52 * (1 - wet)) * t;
         }
 
+        // Burnt ground is dark and stays dark until the ash works in.
+        if (ash > 0.01) {
+          const t = ash * 0.62;
+          r = r * (1 - t) + 34 * t;
+          g = g * (1 - t) + 28 * t;
+          b = b * (1 - t) + 26 * t;
+        }
+        // Built ground: packed, pale, slightly raised-looking.
+        if (built > 0.01) {
+          const t = built * 0.55;
+          r = r * (1 - t) + 168 * t;
+          g = g * (1 - t) + 152 * t;
+          b = b * (1 - t) + 126 * t;
+        }
+
         r *= shade; g *= shade; b *= shade;
+
+        // Airborne grit washes the colour out, the way real haze does.
+        const haze = Math.min(0.5, w.aeolian.dust.data[i] * 5);
+        if (haze > 0.01) {
+          r = r * (1 - haze) + 150 * haze;
+          g = g * (1 - haze) + 138 * haze;
+          b = b * (1 - haze) + 116 * haze;
+        }
+
+        // Flame, added rather than blended: it is the only thing in the case that emits.
+        const fl = w.fire.flame.data[i];
+        if (fl > 0.004) {
+          r += Math.min(255, fl * 320);
+          g += Math.min(190, fl * 150);
+          b += Math.min(80, fl * 30);
+        }
 
         switch (overlay) {
           case "heat": {
@@ -84,6 +118,29 @@ export class Renderer {
           case "forage": {
             const t = Math.min(1, w.forage.capacity.data[i]);
             r = r * (1 - t) + 90 * t; g = g * (1 - t) + 235 * t; b = b * (1 - t) + 110 * t;
+            break;
+          }
+          case "fire": {
+            const fl = Math.min(1, w.fire.flame.data[i] * 1.6);
+            const a = Math.min(1, w.fire.ash.data[i]);
+            const last = w.fire.lastBurn.data[i];
+            const recent = last >= 0 ? Math.max(0, 1 - (w.tick - last) / 2200) : 0;
+            r = r * 0.3 + 250 * fl + 120 * a + 90 * recent;
+            g = g * 0.3 + 120 * fl + 96 * a + 30 * recent;
+            b = b * 0.3 + 40 * fl + 74 * a + 40 * recent;
+            break;
+          }
+          case "claim": {
+            const wt = w.claimWeight.data[i];
+            if (wt > 1e-4) {
+              const shape = w.claimSum.data[i] / wt;
+              const t = Math.min(0.85, wt * 5);
+              const hue = 12 + shape * 300;
+              const [cr, cg, cb] = hsl(hue, 0.62, 0.55);
+              r = r * (1 - t) + cr * t;
+              g = g * (1 - t) + cg * t;
+              b = b * (1 - t) + cb * t;
+            }
             break;
           }
           case "border": {
@@ -162,12 +219,21 @@ export class Renderer {
       const [sx, sy] = cam.toScreen(b.x, b.y, vw, vh);
       if (sx < -8 || sy < -8 || sx > vw + 8 || sy > vh + 8) continue;
       // Colour by habit, so a dialect split is visible as two colours drifting apart.
+      const hunter = b.kind === Kind.Hunter;
       const hue = 12 + b.traits.shape * 300;
       const light = 42 + Math.min(1, b.energy) * 26;
-      ctx.fillStyle = `hsl(${hue} 70% ${light}%)`;
+      ctx.fillStyle = hunter ? `hsl(${hue} 45% ${light + 16}%)` : `hsl(${hue} 70% ${light}%)`;
       ctx.beginPath();
-      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.arc(sx, sy, hunter ? r * 1.5 : r, 0, Math.PI * 2);
       ctx.fill();
+      if (hunter && cam.scale > 2) {
+        // A hunter carries a ring so you can find it in a crowd without a label.
+        ctx.strokeStyle = `hsla(${hue} 60% 82% / 0.85)`;
+        ctx.lineWidth = Math.max(0.5, cam.scale * 0.09);
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 2.4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (detailed) {
         ctx.strokeStyle = `hsl(${hue} 70% ${light + 18}%)`;
         ctx.lineWidth = Math.max(0.5, cam.scale * 0.08);
@@ -191,6 +257,19 @@ export class Renderer {
       drawGlyph(ctx, sx, sy, size, m.shape);
     }
   }
+}
+
+/** Minimal HSL, so the claim overlay can colour ground by whose habit is on it. */
+function hsl(hDeg: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = (((hDeg % 360) + 360) % 360) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) { r = c; g = x; } else if (hp < 2) { r = x; g = c; }
+  else if (hp < 3) { g = c; b = x; } else if (hp < 4) { g = x; b = c; }
+  else if (hp < 5) { r = x; b = c; } else { r = c; b = x; }
+  const m = l - c / 2;
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
 }
 
 /** A shape with no meaning. That is the point of it. */

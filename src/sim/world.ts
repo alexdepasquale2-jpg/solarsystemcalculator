@@ -3,7 +3,9 @@ import { Rng } from "./rng";
 import { Climate, ClimateParams, defaultClimate } from "./climate";
 import { Hydrology, HydroParams, defaultHydro } from "./hydrology";
 import { Forage, ForageParams, defaultForage } from "./forage";
-import { Population, BodyParams, defaultBodies } from "./bodies";
+import { Population, BodyParams, defaultBodies, Kind } from "./bodies";
+import { Fire, FireParams, defaultFire } from "./fire";
+import { Aeolian, AeolianParams, defaultAeolian } from "./aeolian";
 import { Mark, decayMarks, Traits, TRAIT_KEYS } from "./culture";
 
 /**
@@ -20,12 +22,18 @@ export interface WorldParams {
   hydro: HydroParams;
   forage: ForageParams;
   bodies: BodyParams;
+  fire: FireParams;
+  aeolian: AeolianParams;
   /** How fast a path forgets it was walked on. */
   wearDecay: number;
   /** How much walking compacts and hollows the ground. Roads become gullies become barriers. */
   wearIncision: number;
   /** How fast a painted border loses its authority once nobody reinforces it. */
   borderDecay: number;
+  /** How fast an unused shelter falls in. */
+  shelterDecay: number;
+  /** How fast ground forgets whose it was. Slower than a body lives, faster than a ridge. */
+  claimDecay: number;
   markDecay: number;
   populationCap: number;
 }
@@ -35,9 +43,15 @@ export const defaultParams: WorldParams = {
   hydro: defaultHydro,
   forage: defaultForage,
   bodies: defaultBodies,
-  wearDecay: 0.9962,
+  fire: defaultFire,
+  aeolian: defaultAeolian,
+  // A path has to outlast the feet that made it or the record grade is a lie: at the old rate
+  // wear had a half-life of about 180 ticks, which is a fraction of a single body's life.
+  wearDecay: 0.99865,
   wearIncision: 0.00055,
   borderDecay: 0.99965,
+  shelterDecay: 0.99988,
+  claimDecay: 0.99930,
   markDecay: 0.99955,
   populationCap: 900,
 };
@@ -75,10 +89,17 @@ export class World {
   border: Field;
   /** Where habits travel easily. */
   carry: Field;
+  /** Built-up ground: burrows, windbreaks, whatever a body makes by sitting still. */
+  shelter: Field;
+  /** Whose ground this is, as a weighted running average of the habits laid down on it. */
+  claimSum: Field;
+  claimWeight: Field;
 
   climate: Climate;
   hydro: Hydrology;
   forage: Forage;
+  fire: Fire;
+  aeolian: Aeolian;
   pop: Population;
 
   marks: Mark[] = [];
@@ -94,10 +115,15 @@ export class World {
     this.wear = new Field(this.w, this.h, 0);
     this.border = new Field(this.w, this.h, 0);
     this.carry = new Field(this.w, this.h, 0);
+    this.shelter = new Field(this.w, this.h, 0);
+    this.claimSum = new Field(this.w, this.h, 0);
+    this.claimWeight = new Field(this.w, this.h, 0);
 
     this.climate = new Climate(this.w, this.h);
     this.hydro = new Hydrology(this.w, this.h);
     this.forage = new Forage(this.w, this.h);
+    this.fire = new Fire(this.w, this.h);
+    this.aeolian = new Aeolian(this.w, this.h);
     this.pop = new Population(this.w, this.h);
   }
 
@@ -150,10 +176,23 @@ export class World {
 
   /** Media only. Used for settling, and for the slow tick while you are away. */
   stepPhysics(dt: number): void {
-    this.climate.step(this.elev, this.hydro.water, this.params.climate, dt);
-    this.hydro.step(this.elev, this.climate.moisture, this.params.hydro, dt);
+    const p = this.params;
+    this.climate.step(this.elev, this.hydro.water, p.climate, dt, this.tick);
+    this.hydro.step(this.elev, this.climate.moisture, p.hydro, dt);
+    // Wind-blown grit is the slowest thing in the case by an order of magnitude, so it runs on
+    // every other tick at double weight rather than costing a full grid pass every time.
+    if ((this.tick & 1) === 0) {
+      this.aeolian.step(
+        this.elev, this.hydro.water, this.forage.biomass, this.hydro.hardness,
+        this.climate.windX, this.climate.windY, p.aeolian, dt * 2,
+      );
+    }
     this.forage.step(
-      this.elev, this.climate.heat, this.hydro.water, this.wear, this.params.forage, dt,
+      this.elev, this.climate.heat, this.hydro.water, this.wear, this.fire.ash, p.forage, dt,
+    );
+    this.fire.step(
+      this.forage.biomass, this.climate.heat, this.hydro.water,
+      { x: this.climate.windX, y: this.climate.windY }, p.fire, this.rng, dt, this.tick,
     );
   }
 
@@ -178,6 +217,10 @@ export class World {
         border: this.border,
         carry: this.carry,
         biomass: this.forage.biomass,
+        flame: this.fire.flame,
+        shelter: this.shelter,
+        claimSum: this.claimSum,
+        claimWeight: this.claimWeight,
         eat: (x, y, d) => this.forage.eat(x, y, d, p.forage),
         marks: this.marks,
         tick: this.tick,
@@ -196,14 +239,28 @@ export class World {
     for (let i = 0; i < wear.length; i++) {
       const wv = wear[i];
       if (wv > 0.05) {
-        elev[i] -= p.wearIncision * wv * dt;
+        // Trampled dirt is not destroyed, it is loosened: it goes into suspension and the water
+        // takes it somewhere. Subtracting it outright planed the whole case down over 10k ticks.
+        const cut = p.wearIncision * wv * dt;
+        elev[i] -= cut;
+        this.hydro.sediment.data[i] += cut;
         hard[i] += 0.00018 * wv * dt;
       }
     }
     this.wear.scale(Math.pow(p.wearDecay, dt));
-    this.wear.diffuse(0.010 * dt);
+    // Barely any smearing: wear that diffuses turns every path into a halo around wherever the
+    // herd stood, and a halo never becomes a road no matter how deep it gets.
+    this.wear.diffuse(0.0035 * dt);
+    this.wear.clamp(0, 2.5);
     this.border.scale(Math.pow(p.borderDecay, dt));
     this.carry.scale(0.99975);
+    this.shelter.scale(Math.pow(p.shelterDecay, dt));
+    this.shelter.clamp(0, 6);
+    // Ground forgets whose it was at the same rate in both terms, so the average it stores stays
+    // an average and does not drift as it fades.
+    const cd = Math.pow(p.claimDecay, dt);
+    this.claimSum.scale(cd);
+    this.claimWeight.scale(cd);
     this.marks = decayMarks(this.marks, Math.pow(p.markDecay, dt));
 
     this.tick += dt;
@@ -235,15 +292,18 @@ export class World {
       .sort((a, b) => a.e.tick - b.e.tick)
       .map((r) => r.e);
 
-    let n = 0;
+    let n = 0, grazers = 0, hunters = 0;
     const mean: Traits = { warmth: 0, gregarious: 0, roadLove: 0, borderFear: 0, venture: 0, shape: 0 };
     for (const b of this.pop.bodies) {
       if (Math.hypot(b.x - x, b.y - y) > 9) continue;
       n++;
+      if (b.kind === Kind.Hunter) hunters++; else grazers++;
       for (const k of TRAIT_KEYS) mean[k] += b.traits[k];
     }
     if (n) for (const k of TRAIT_KEYS) mean[k] /= n;
 
+    const claimW = this.claimWeight.sample(x, y);
+    const lastBurn = this.fire.lastBurn.sample(x, y);
     return {
       x, y,
       elevation: this.elev.sample(x, y),
@@ -254,6 +314,15 @@ export class World {
       border: this.border.sample(x, y),
       sterile: this.forage.sterile.sample(x, y),
       carry: this.carry.sample(x, y),
+      shelter: this.shelter.sample(x, y),
+      flame: this.fire.flame.sample(x, y),
+      ash: this.fire.ash.sample(x, y),
+      dust: this.aeolian.dust.sample(x, y),
+      claimStrength: claimW,
+      claimShape: claimW > 1e-4 ? this.claimSum.sample(x, y) / claimW : null,
+      ticksSinceBurn: lastBurn >= 0 ? this.tick - lastBurn : null,
+      grazersNearby: grazers,
+      huntersNearby: hunters,
       bodiesNearby: n,
       localTraits: n ? mean : null,
       history: near,
@@ -262,9 +331,17 @@ export class World {
 
   stats(): Stats {
     const bodies = this.pop.bodies;
-    let energy = 0;
+    let energy = 0, grazers = 0, hunters = 0;
     const shapes: number[] = [];
-    for (const b of bodies) { energy += b.energy; shapes.push(b.traits.shape); }
+    const lineages = new Set<number>();
+    let oldest = Infinity;
+    for (const b of bodies) {
+      energy += b.energy;
+      shapes.push(b.traits.shape);
+      lineages.add(b.lineage);
+      if (b.kind === Kind.Hunter) hunters++; else grazers++;
+      if (b.lineage < oldest) oldest = b.lineage;
+    }
     shapes.sort((a, b) => a - b);
     // Rough read on whether the habit pool has split in two. Not a win condition; a readout.
     let biggestGap = 0, gapAt = 0;
@@ -274,11 +351,21 @@ export class World {
     }
     return {
       tick: this.tick,
+      year: this.tick / this.params.climate.seasonPeriod,
+      season: this.climate.season,
       population: bodies.length,
+      grazers,
+      hunters,
+      lineages: lineages.size,
+      eldestLineage: Number.isFinite(oldest) ? oldest : 0,
       meanEnergy: bodies.length ? energy / bodies.length : 0,
       water: this.hydro.water.sum() / (this.w * this.h),
       biomass: this.forage.biomass.mean(),
       wear: this.wear.mean(),
+      shelter: this.shelter.mean(),
+      burning: this.fire.burning(),
+      ash: this.fire.ash.mean(),
+      haze: this.aeolian.haze(),
       marks: this.marks.length,
       dialectSplit: biggestGap,
       dialectSplitAt: gapAt,
@@ -297,6 +384,15 @@ export interface Probe {
   border: number;
   sterile: number;
   carry: number;
+  shelter: number;
+  flame: number;
+  ash: number;
+  dust: number;
+  claimStrength: number;
+  claimShape: number | null;
+  ticksSinceBurn: number | null;
+  grazersNearby: number;
+  huntersNearby: number;
   bodiesNearby: number;
   localTraits: Traits | null;
   history: LedgerEntry[];
@@ -304,11 +400,21 @@ export interface Probe {
 
 export interface Stats {
   tick: number;
+  year: number;
+  season: number;
   population: number;
+  grazers: number;
+  hunters: number;
+  lineages: number;
+  eldestLineage: number;
   meanEnergy: number;
   water: number;
   biomass: number;
   wear: number;
+  shelter: number;
+  burning: number;
+  ash: number;
+  haze: number;
   marks: number;
   dialectSplit: number;
   dialectSplitAt: number;

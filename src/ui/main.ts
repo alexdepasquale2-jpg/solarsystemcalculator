@@ -4,6 +4,7 @@ import { serialize, deserialize } from "../sim/persist";
 import { Renderer, Overlay } from "../render/renderer";
 import { Camera } from "../render/camera";
 import { TRAIT_KEYS } from "../sim/culture";
+import { Chronicle, structures, describe } from "../sim/observe";
 
 const SAVE_KEY = "still-tank.case.v1";
 /** Real seconds per tick while the window is closed. The case runs slow, not fast. */
@@ -12,6 +13,8 @@ const OFFLINE_SECONDS_PER_TICK = 9;
 const canvas = document.getElementById("tank") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 const readout = document.getElementById("readout")!;
+const shapesEl = document.getElementById("shapes")!;
+const chronicleEl = document.getElementById("chronicle")!;
 const statsEl = document.getElementById("stats")!;
 const noticeEl = document.getElementById("notice")!;
 
@@ -53,6 +56,12 @@ let overlay: Overlay = "none";
 let running = true;
 let speed = 1;
 let probeAt: [number, number] | null = null;
+
+// Reading the case is not free — finding connected runs of worn ground means walking the whole
+// grid — so it happens on its own slow clock, well under the rate anything it reports changes at.
+const chronicle = new Chronicle();
+let nextChronicle = 0;
+let nextShapes = 0;
 
 // --- camera input: one volume, no second map ------------------------------------------------
 let dragging = false;
@@ -181,10 +190,27 @@ function loop(now = performance.now()): void {
     for (let i = 0; i < budget; i++) world.step(1);
     owed -= budget;
   }
+  if (world.tick >= nextChronicle) {
+    chronicle.sample(world);
+    nextChronicle = world.tick + 400;
+    drawChronicle();
+  }
+  if (world.tick >= nextShapes) {
+    drawShapes();
+    nextShapes = world.tick + 90;
+  }
   frame++;
   renderer.draw(ctx, cam, canvas.width, canvas.height, overlay, frame % 3 === 0);
   if (frame % 12 === 0) { drawStats(); drawProbe(); }
   requestAnimationFrame(loop);
+}
+
+const SEASONS = ["deep winter", "early spring", "spring", "high summer", "late summer", "autumn"];
+
+function seasonName(phase: number): string {
+  // phase runs -1..1 as a sine; six names is enough to tell you which way the year is going.
+  const idx = Math.min(SEASONS.length - 1, Math.floor(((phase + 1) / 2) * SEASONS.length));
+  return SEASONS[idx];
 }
 
 function drawStats(): void {
@@ -193,10 +219,28 @@ function drawStats(): void {
   const split = s.dialectSplit > 0.16
     ? `two habits, gap ${s.dialectSplit.toFixed(2)}`
     : "one habit pool";
-  statsEl.textContent =
-    `tick ${s.tick} · ${s.population} bodies · energy ${s.meanEnergy.toFixed(2)} · ` +
-    `water ${s.water.toFixed(3)} · green ${s.biomass.toFixed(2)} · wear ${s.wear.toFixed(3)} · ` +
-    `${s.marks} marks · ${split}`;
+  const fire = s.burning > 0.5 ? ` · ${s.burning.toFixed(0)} burning` : "";
+  const haze = s.haze > 0.004 ? " · dust in the air" : "";
+  statsEl.textContent = [
+    `year ${s.year.toFixed(1)}, ${seasonName(s.season)} · tick ${s.tick}`,
+    `${s.grazers} grazers · ${s.hunters} hunters · ${s.lineages} lineages`,
+    `energy ${s.meanEnergy.toFixed(2)} · green ${s.biomass.toFixed(2)} · water ${s.water.toFixed(3)}`,
+    `wear ${s.wear.toFixed(3)} · built ${s.shelter.toFixed(3)} · ash ${s.ash.toFixed(3)}${fire}${haze}`,
+    `${s.marks} marks · ${split}`,
+  ].join("\n");
+}
+
+function drawShapes(): void {
+  if (!world) return;
+  shapesEl.textContent = describe(structures(world)).join("\n");
+}
+
+function drawChronicle(): void {
+  if (!world) return;
+  const recent = chronicle.entries.slice(-7);
+  chronicleEl.textContent = recent.length
+    ? recent.map((e) => `${String(e.tick).padStart(6)}  ${e.text}`).join("\n")
+    : "nothing worth writing down yet";
 }
 
 function drawProbe(): void {
@@ -209,6 +253,17 @@ function drawProbe(): void {
     `green ${p.biomass.toFixed(2)}  wear ${p.wear.toFixed(3)}  border ${p.border.toFixed(2)}`,
     `${p.bodiesNearby} bodies within nine cells`,
   ];
+  if (p.grazersNearby || p.huntersNearby) {
+    lines[3] = `${p.grazersNearby} grazers, ${p.huntersNearby} hunters within nine cells`;
+  }
+  if (p.claimShape !== null && p.claimStrength > 0.02) {
+    lines.push(`ground claimed by habit ${p.claimShape.toFixed(2)} (${p.claimStrength.toFixed(2)})`);
+  }
+  if (p.shelter > 0.02) lines.push(`built up here: ${p.shelter.toFixed(2)}`);
+  if (p.flame > 0.01) lines.push(`ON FIRE (${p.flame.toFixed(2)})`);
+  else if (p.ticksSinceBurn !== null && p.ticksSinceBurn < 4000) {
+    lines.push(`burned ${p.ticksSinceBurn} ticks ago · ash ${p.ash.toFixed(2)}`);
+  }
   if (p.localTraits) {
     lines.push("their habits: " + TRAIT_KEYS
       .map((k) => `${k} ${p.localTraits![k].toFixed(2)}`).join("  "));
@@ -239,6 +294,8 @@ requestAnimationFrame(() => setTimeout(() => {
   cam = new Camera(world.w / 2, world.h / 2, Math.max(1.2, Math.min(12, fit)));
   renderer = new Renderer(world);
   drawStats();
+  drawShapes();
+  drawChronicle();
   flash(awayNotice);
   loop();
 }, 30));

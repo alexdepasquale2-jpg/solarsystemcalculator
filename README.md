@@ -22,6 +22,23 @@ carrying capacity. The bodies are **continuous-space agents** with no grid posit
 read the fields by bilinear sample, sum six local pulls, and move. The two are coupled in both
 directions. Nothing addresses a body by name and nothing anywhere knows the word "herd".
 
+## What is in the case
+
+| | |
+|---|---|
+| **dirt** | erodible bed, hillslope creep, silt exported and welled back up |
+| **water** | shallow flow, erosion and deposition, a water table that settles |
+| **heat** | lamp on a yearly cycle, conduction, buoyant wind, evaporation and rain as one budget |
+| **grit** | wind lifts bare dry loose ground and drops it where the air slows or a plant catches it |
+| **forage** | logistic growth against local carrying capacity; grazing takes a share, not a ration |
+| **fire** | hot, dry, fuelled ground catches; flame runs downwind; ash makes the burn fertile |
+| **grazers** | continuous-space agents that eat the field |
+| **hunters** | the same, but they eat grazers, and most of their hunts fail |
+| **wear** | travel writes into the ground and outlasts the traveller |
+| **shelter** | a body that sits still somewhere good builds the ground up under itself |
+| **claims** | ground carries the average habit of whoever has been walking on it |
+| **habits** | six traits, copied off well-fed neighbours, wrong |
+
 ## Where the emergence actually is
 
 The design doc grades emergence three ways. Each grade has a specific mechanism here, and each
@@ -36,7 +53,7 @@ A body that grew up on the warm side inherits a warmth preference tuned to the w
 neighbours who share it, and its descendants stop being able to make a living on the cold side.
 Same rules, different job, because of position.
 
-**Record** — this is the one that matters, and it is three couplings:
+**Record** — this is the one that matters, and it is four couplings:
 
 - footfall writes into `wear`; wear attracts the next body (`roadLove`); traffic compacts the
   ground and incises it; the hollow takes water; the water finishes the cut. A body lives a few
@@ -47,6 +64,31 @@ Same rules, different job, because of position.
   it. That is a dialect.
 - a mark you leave on the ground is copied by passing bodies, wrong, and they re-emit their
   version. Generation 0 is your hand. Generation 4 is a custom.
+- ground accumulates the habits of whoever walks it. Two groups whose habits have drifted apart
+  read each other's ground as foreign and steer off it, which sharpens the line between them,
+  which keeps them from meeting, which lets them drift further. That is a border, and it is
+  recomputed from feet rather than stored anywhere.
+
+## Things that took real tuning
+
+Four of these systems only work inside a narrow band, and each one failed loudly first:
+
+- **Predator and prey.** Certain kills plus a high encounter rate is not a cycle, it is an
+  ending: the hunters found every grazer, ate them, and starved. What makes them coexist is
+  three things together — most hunts fail; a hunt is likelier to fail the more herd-mates the
+  prey has standing around it; and a hunter pays hard to stay warm, so the cold rim of the case
+  is permanent grazer country that no hunter can afford to follow them into. The consequence is
+  that gregariousness stops being a preference the bodies happen to have and becomes a thing
+  that pays.
+- **Fire.** A hard "must be bone dry" gate meant it never caught at all — the case is damp
+  everywhere. Dryness had to become a matter of degree, so that late summer on a south-facing
+  slope is enough and April never is.
+- **Roads.** Wear that spreads is a halo around wherever the herd stood, and a halo is not a
+  road no matter how deep. It took barely any diffusion, plus wear that goes as the *square* of
+  speed — travel writes, milling about does not.
+- **Dialects.** Bodies copying the single best-fed neighbour in earshot converge on one habit
+  inside a few thousand ticks, and then there is nothing for a border to be a border between.
+  Imitation had to be weighted by how well you parse the other body.
 
 ## The failure modes it is built against
 
@@ -93,9 +135,13 @@ src/sim/rng.ts         seeded xorshift — the case must replay exactly
 src/sim/climate.ts     lamp, conduction, buoyant wind, evaporation and rain as one budget
 src/sim/hydrology.ts   shallow water, erosion, deposition, hillslope creep, silt export
 src/sim/forage.ts      logistic growth against local carrying capacity; density-dependent grazing
+src/sim/fire.ts        ignition from heat, dryness and fuel; spread downwind; fertile ash
+src/sim/aeolian.ts     wind lifting and dropping loose grit — the doc's own dune example
 src/sim/bodies.ts      continuous-space agents, spatial hash, the six local pulls
 src/sim/culture.ts     traits, imitation with copy error, dialect distance, marks
 src/sim/world.ts       the coupling order, the ledger, the probe
+src/sim/observe.ts     reads the case and names what is in it — imports nothing, is imported by
+                       nothing in the sim, and so cannot cause a single thing it reports
 src/sim/tools.ts       the six tools, as biases
 src/sim/persist.ts     the case does not reset when you blink
 src/render/            zoom-as-map camera, one volume, grit at close range
@@ -106,6 +152,11 @@ src/ui/main.ts         the thin strip, the readout, the slow tick
 
 Drag to move, wheel to zoom — there is one volume and no second map. Pick a tool, click once.
 Shift-click anywhere to read what is there, including anything you did there and when.
+
+Three panels. **Specimen reading** is the spot under your cursor. **What has taken shape** is the
+whole case described — paths, built ground, channels, burns, herds, frontiers — recomputed every
+ninety ticks from the state, never from a script. **The case so far** is the chronicle: what
+changed since it last looked. It is written by observation and can cause none of what it reports.
 
 The tick slider is the only concession to impatience. At 1 the case runs at 8 ticks a second and
 a road takes an hour. The interesting sessions are the ones where you use a tool twice and spend

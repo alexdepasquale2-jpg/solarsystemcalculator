@@ -23,6 +23,8 @@ export interface ForageParams {
   /** Seed blown in from elsewhere. Without it, ground stripped to zero can never come back:
    *  logistic growth multiplied by nothing stays nothing, and the herd eats itself a desert. */
   seedRain: number;
+  /** How much burnt ground out-produces unburnt ground while the ash lasts. */
+  ashBonus: number;
 }
 
 export const defaultForage: ForageParams = {
@@ -36,6 +38,7 @@ export const defaultForage: ForageParams = {
   grazeFraction: 0.060,
   maxBite: 0.030,
   seedRain: 0.0016,
+  ashBonus: 0.55,
 };
 
 export class Forage {
@@ -52,7 +55,10 @@ export class Forage {
     this.sterile = new Field(w, h, 0);
   }
 
-  step(elev: Field, heat: Field, water: Field, wear: Field, p: ForageParams, dt: number): void {
+  step(
+    elev: Field, heat: Field, water: Field, wear: Field, ash: Field,
+    p: ForageParams, dt: number,
+  ): void {
     const { w, h } = elev;
     const bio = this.biomass, cap = this.capacity;
 
@@ -66,9 +72,14 @@ export class Forage {
         const dw = (wet - p.wetOptimum) / p.wetTolerance;
         let k = Math.exp(-dh * dh) * Math.exp(-dw * dw);
         k /= 1 + slope * p.slopePenalty;
-        // Trampled ground carries less. A road is a thing plants lose.
-        k /= 1 + wear.data[i] * 3.5;
+        // Trampled ground carries less. A road is a thing plants lose — but only where the feet
+        // actually fall: once wear was made to persist, a heavy penalty here paved the case and
+        // starved the herd that paved it.
+        k /= 1 + wear.data[i] * 1.8;
         k *= 1 - Math.min(1, this.sterile.data[i]);
+        // Burnt ground comes back better than it was. This is the reason a fire is worth having:
+        // it lays down a fertile scar the herd will find two seasons later.
+        k *= 1 + p.ashBonus * Math.min(1.5, ash.data[i]);
         cap.data[i] = k;
         const room = 1 - bio.data[i] / Math.max(1e-3, k);
         bio.data[i] += (p.growth * bio.data[i] + p.seedRain * k) * room * dt;

@@ -34,7 +34,7 @@ const COPY_SIGMA: Record<keyof Traits, number> = {
   roadLove: 0.035,
   borderFear: 0.030,
   venture: 0.025,
-  shape: 0.055,
+  shape: 0.075,
 };
 
 const BOUNDS: Record<keyof Traits, [number, number]> = {

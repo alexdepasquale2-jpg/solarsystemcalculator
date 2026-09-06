@@ -25,6 +25,12 @@ export interface ClimateParams {
   saturationSlope: number;
   /** Constant drizzle, so a saturated sky is not the only way to get weather. */
   drizzle: number;
+  /** How far the lamp swings over a year, as a fraction of its power. */
+  seasonAmplitude: number;
+  /** Ticks in a year. Long enough that a body lives through a handful of them. */
+  seasonPeriod: number;
+  /** How much the lamp's pool drifts across the case between solstices. */
+  seasonDrift: number;
 }
 
 export const defaultClimate: ClimateParams = {
@@ -42,6 +48,9 @@ export const defaultClimate: ClimateParams = {
   saturationBase: 0.06,
   saturationSlope: 0.30,
   drizzle: 0.004,
+  seasonAmplitude: 0.34,
+  seasonPeriod: 1400,
+  seasonDrift: 0.10,
 };
 
 export class Climate {
@@ -49,6 +58,8 @@ export class Climate {
   moisture: Field;
   windX: Field;
   windY: Field;
+  /** Where the year currently sits, -1 deep winter to +1 high summer. A readout, not a state. */
+  season = 0;
   /** Player-added or player-removed heat, persistent until the physics eats it. */
   heatBias: Field;
 
@@ -62,13 +73,26 @@ export class Climate {
     this.heatBias = new Field(w, h, 0);
   }
 
-  step(elev: Field, water: Field, p: ClimateParams, dt: number): void {
+  /**
+   * The lamp is on a timer nobody in the case can see.
+   *
+   * A year is not an event and not a script: the lamp's power and the position of its pool move
+   * on a sine, and everything downstream — where it rains, where the grass is worth eating, which
+   * side of the case is habitable — follows from that one moving number. It is what stops the
+   * tank from finding one comfortable arrangement and sitting in it forever.
+   */
+  step(elev: Field, water: Field, p: ClimateParams, dt: number, tick = 0): void {
     const { w, h } = elev;
     const heat = this.heat, moist = this.moisture;
     // Height is measured against the floor's own average, so the lapse rate tracks relief
     // rather than whatever absolute number the dirt happens to sit at after a century of silt.
     const elevMean = elev.mean();
-    const cx = (w - 1) * 0.5, cy = (h - 1) * 0.42;
+    const year = (tick / p.seasonPeriod) * Math.PI * 2;
+    const season = Math.sin(year);
+    const power = p.lampPower * (1 + p.seasonAmplitude * season);
+    this.season = season;
+    const cx = (w - 1) * 0.5;
+    const cy = (h - 1) * (0.42 + p.seasonDrift * season);
     const sx = p.lampSpread * w, sy = p.lampSpread * h;
 
     for (let y = 0; y < h; y++) {
@@ -76,7 +100,7 @@ export class Climate {
         const i = y * w + x;
         // Lamp: a soft pool, not a uniform sky. Corners are structurally colder.
         const dx = (x - cx) / sx, dy = (y - cy) / sy;
-        const lamp = p.lampPower * Math.exp(-(dx * dx + dy * dy));
+        const lamp = power * Math.exp(-(dx * dx + dy * dy));
         // Standing water takes longer to warm and longer to cool.
         const inertia = 1 / (1 + water.data[i] * 2.5);
         const target = p.ambient + lamp - p.lapse * (elev.data[i] - elevMean) + this.heatBias.data[i];
