@@ -4,87 +4,259 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Still Tank</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,300;1,6..72,400&display=swap" />
 <style>
+  /* A lit vitrine in a dark room. Committed to one visual world on purpose: the case is the
+     only light source on the page, so every surface is painted explicitly rather than inheriting
+     a host ground. */
   :root {
-    --ink: #dfe3ea;
-    --dim: #7d8593;
-    --edge: #1c2028;
-    --panel: #0d0f14cc;
+    --room: #06070a;
+    --glass: #0d1016;
+    --glass-solid: #0f131a;
+    --edge: #1c2431;
+    --edge-lit: #2c3849;
+    --ink: #dde2ea;
+    --dim: #79838f;
+    --faint: #4e5764;
+    --lamp: #d8a13f;
+    --lamp-dim: #7a6033;
+    --step: 0.5rem;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --voice: "Newsreader", Georgia, "Times New Roman", serif;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #07080b; color: var(--ink);
-    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
-  #tank { position: fixed; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 
-  .strip {
-    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
-    display: flex; gap: 4px; align-items: center; padding: 6px;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
-    backdrop-filter: blur(6px); flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 24px);
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--room);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
   }
-  button {
-    background: transparent; color: var(--dim); border: 1px solid transparent;
-    padding: 4px 8px; border-radius: 5px; font: inherit; cursor: pointer;
-  }
-  button:hover { color: var(--ink); border-color: var(--edge); }
-  button.on { color: #0b0c10; background: var(--ink); }
-  .sep { width: 1px; height: 18px; background: var(--edge); margin: 0 4px; }
-  input[type=range] { width: 78px; accent-color: #8fa3bf; }
 
-  .panel {
-    position: fixed; top: 12px; left: 12px; padding: 8px 10px; max-width: 46ch;
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
-    white-space: pre-wrap; color: var(--dim); backdrop-filter: blur(6px);
+  #tank {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    touch-action: none;
+    display: block;
   }
-  #stats { position: fixed; top: 12px; right: 12px; left: auto; }
+
+  /* --- the two plates fixed to the glass ------------------------------------------------- */
+  .plate {
+    position: fixed;
+    top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 9px 12px 10px;
+    background: color-mix(in srgb, var(--glass) 82%, transparent);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+    backdrop-filter: blur(7px);
+    max-width: 44ch;
+  }
+  .plate--left { left: 14px; }
+  .plate--right { right: 14px; text-align: right; max-width: 34ch; }
+
+  .eyebrow {
+    margin: 0;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  #readout {
+    margin: 0;
+    white-space: pre-wrap;
+    color: var(--dim);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  #stats {
+    color: var(--dim);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+
+  /* --- the case speaking ------------------------------------------------------------------ */
   #notice {
-    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    padding: 10px 14px; background: #0d0f14e6; border: 1px solid var(--edge);
-    border-radius: 8px; opacity: 0; transition: opacity .5s; pointer-events: none;
+    position: fixed;
+    left: 50%;
+    top: 46%;
+    transform: translate(-50%, -50%);
+    padding: 12px 20px;
+    max-width: 40ch;
+    text-align: center;
+    font-family: var(--voice);
+    font-style: italic;
+    font-size: 17px;
+    line-height: 1.35;
+    color: var(--ink);
+    background: color-mix(in srgb, var(--glass-solid) 92%, transparent);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 700ms ease;
+    pointer-events: none;
   }
   #notice.show { opacity: 1; }
-  .lbl { color: #565d6b; padding: 0 4px; }
+
+  /* --- the instrument rail ---------------------------------------------------------------- */
+  .rail {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    max-width: calc(100vw - 28px);
+    flex-wrap: wrap;
+    justify-content: center;
+    background: color-mix(in srgb, var(--glass) 88%, transparent);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    backdrop-filter: blur(7px);
+  }
+
+  .group { display: flex; align-items: center; gap: 2px; }
+  .group > .tag {
+    margin-right: 5px;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .rule { width: 1px; align-self: stretch; background: var(--edge); }
+
+  button {
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--dim);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  }
+  button:hover { color: var(--ink); border-color: var(--edge-lit); }
+  button:focus-visible { outline: 2px solid var(--lamp); outline-offset: 1px; }
+
+  /* One accent, spent in one place: the tool your next click will use. */
+  button.on {
+    color: var(--lamp);
+    border-color: var(--lamp-dim);
+    background: color-mix(in srgb, var(--lamp) 9%, transparent);
+  }
+  #reseed { color: var(--faint); }
+  #reseed:hover { color: #c98d80; border-color: #4a2f2c; }
+
+  input[type="range"] {
+    width: 74px;
+    accent-color: var(--lamp);
+    background: transparent;
+  }
+  input[type="range"]:focus-visible { outline: 2px solid var(--lamp); outline-offset: 3px; }
+
+  .hint {
+    flex-basis: 100%;
+    margin: 1px 0 0;
+    text-align: center;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #3d4552;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #notice { transition: none; }
+    button { transition: none; }
+  }
+
+  @media (max-width: 900px) {
+    .plate--right { display: none; }
+    .plate--left { max-width: 30ch; }
+    .group > .tag { display: none; }
+  }
 </style>
+
 </head>
-<body>
-  <canvas id="tank"></canvas>
+<body style="margin:0">
+<canvas id="tank"></canvas>
 
-  <div class="panel" id="readout">Shift-click, or click a tool then the ground.</div>
-  <div class="panel" id="stats"></div>
-  <div id="notice"></div>
+<section class="plate plate--left">
+  <h2 class="eyebrow">Specimen reading</h2>
+  <pre id="readout">Shift-click, or click a tool then the ground.</pre>
+</section>
 
-  <div class="strip">
+<section class="plate plate--right">
+  <h2 class="eyebrow">Case vitals</h2>
+  <div id="stats"></div>
+</section>
+
+<p id="notice"></p>
+
+<nav class="rail" aria-label="Tools">
+  <span class="group">
+    <span class="tag">Touch</span>
     <button data-tool="matter" class="on">matter</button>
     <button data-tool="heat">heat</button>
     <button data-tool="block">block</button>
     <button data-tool="open">open</button>
     <button data-tool="rule">rule</button>
     <button data-tool="mark">mark</button>
+  </span>
 
-    <span class="sep"></span>
+  <span class="rule"></span>
+
+  <span class="group">
     <span id="signrow"><button id="sign">add</button></span>
     <span id="rules" hidden>
       <button data-rule="border" class="on">border</button>
       <button data-rule="barren">barren</button>
       <button data-rule="carry">sound carries</button>
     </span>
+  </span>
 
-    <span class="sep"></span>
-    <span class="lbl">size</span><input id="radius" type="range" min="2" max="24" value="6" />
-    <span class="lbl">tick</span><input id="speed" type="range" min="0" max="6" value="1" />
+  <span class="rule"></span>
 
-    <span class="sep"></span>
+  <span class="group">
+    <span class="tag">Size</span>
+    <input id="radius" type="range" min="2" max="24" value="6" aria-label="Brush size" />
+    <span class="tag" style="margin-left:6px">Tick</span>
+    <input id="speed" type="range" min="0" max="6" value="1" aria-label="Ticks per second" />
+  </span>
+
+  <span class="rule"></span>
+
+  <span class="group">
+    <span class="tag">Look at</span>
     <button data-overlay="none" class="on">plain</button>
     <button data-overlay="heat">heat</button>
     <button data-overlay="water">water</button>
     <button data-overlay="wear">wear</button>
     <button data-overlay="forage">forage</button>
     <button data-overlay="border">rules</button>
+  </span>
 
-    <span class="sep"></span>
-    <button id="reseed">new case</button>
-  </div>
+  <span class="rule"></span>
+  <button id="reseed">new case</button>
 
-  <script type="module" src="/src/ui/main.ts"></script>
+  <p class="hint">Drag to move · wheel to zoom · shift-click to read the ground</p>
+</nav>
+
+<script type="module" src="/src/ui/main.ts"></script>
 </body>
 </html>

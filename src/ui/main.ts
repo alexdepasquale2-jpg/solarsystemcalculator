@@ -233,7 +233,10 @@ noticeEl.textContent = "settling the case…";
 noticeEl.classList.add("show");
 requestAnimationFrame(() => setTimeout(() => {
   boot();
-  cam = new Camera(world.w / 2, world.h / 2, 3);
+  // Open filling the frame: there is only one volume, so arriving letterboxed inside it
+  // just makes the case look like a picture of a case.
+  const fit = Math.min(canvas.width, canvas.height) * 0.94 / world.h;
+  cam = new Camera(world.w / 2, world.h / 2, Math.max(1.2, Math.min(12, fit)));
   renderer = new Renderer(world);
   drawStats();
   flash(awayNotice);
