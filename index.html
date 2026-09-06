@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Still Tank</title>
+<style>
+  :root {
+    --ink: #dfe3ea;
+    --dim: #7d8593;
+    --edge: #1c2028;
+    --panel: #0d0f14cc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #07080b; color: var(--ink);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
+  #tank { position: fixed; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+
+  .strip {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; gap: 4px; align-items: center; padding: 6px;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+    backdrop-filter: blur(6px); flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 24px);
+  }
+  button {
+    background: transparent; color: var(--dim); border: 1px solid transparent;
+    padding: 4px 8px; border-radius: 5px; font: inherit; cursor: pointer;
+  }
+  button:hover { color: var(--ink); border-color: var(--edge); }
+  button.on { color: #0b0c10; background: var(--ink); }
+  .sep { width: 1px; height: 18px; background: var(--edge); margin: 0 4px; }
+  input[type=range] { width: 78px; accent-color: #8fa3bf; }
+
+  .panel {
+    position: fixed; top: 12px; left: 12px; padding: 8px 10px; max-width: 46ch;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+    white-space: pre-wrap; color: var(--dim); backdrop-filter: blur(6px);
+  }
+  #stats { position: fixed; top: 12px; right: 12px; left: auto; }
+  #notice {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    padding: 10px 14px; background: #0d0f14e6; border: 1px solid var(--edge);
+    border-radius: 8px; opacity: 0; transition: opacity .5s; pointer-events: none;
+  }
+  #notice.show { opacity: 1; }
+  .lbl { color: #565d6b; padding: 0 4px; }
+</style>
+</head>
+<body>
+  <canvas id="tank"></canvas>
+
+  <div class="panel" id="readout">Shift-click, or click a tool then the ground.</div>
+  <div class="panel" id="stats"></div>
+  <div id="notice"></div>
+
+  <div class="strip">
+    <button data-tool="matter" class="on">matter</button>
+    <button data-tool="heat">heat</button>
+    <button data-tool="block">block</button>
+    <button data-tool="open">open</button>
+    <button data-tool="rule">rule</button>
+    <button data-tool="mark">mark</button>
+
+    <span class="sep"></span>
+    <span id="signrow"><button id="sign">add</button></span>
+    <span id="rules" hidden>
+      <button data-rule="border" class="on">border</button>
+      <button data-rule="barren">barren</button>
+      <button data-rule="carry">sound carries</button>
+    </span>
+
+    <span class="sep"></span>
+    <span class="lbl">size</span><input id="radius" type="range" min="2" max="24" value="6" />
+    <span class="lbl">tick</span><input id="speed" type="range" min="0" max="6" value="1" />
+
+    <span class="sep"></span>
+    <button data-overlay="none" class="on">plain</button>
+    <button data-overlay="heat">heat</button>
+    <button data-overlay="water">water</button>
+    <button data-overlay="wear">wear</button>
+    <button data-overlay="forage">forage</button>
+    <button data-overlay="border">rules</button>
+
+    <span class="sep"></span>
+    <button id="reseed">new case</button>
+  </div>
+
+  <script type="module" src="/src/ui/main.ts"></script>
+</body>
+</html>
