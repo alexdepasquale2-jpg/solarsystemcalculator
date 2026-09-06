@@ -27,7 +27,10 @@ let awayNotice = "";
  * a frame first so it can say so, then do the work.
  */
 function boot(): void {
-  const saved = localStorage.getItem(SAVE_KEY);
+  // Storage can be missing or throw outright (private windows, embedded frames with site data
+  // blocked). A case that cannot be saved is still a case.
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(SAVE_KEY); } catch { saved = null; }
   const loaded = saved ? deserialize(saved) : null;
   if (loaded) {
     world = loaded.world;
@@ -59,7 +62,7 @@ let probeAt: [number, number] | null = null;
 
 // Reading the case is not free — finding connected runs of worn ground means walking the whole
 // grid — so it happens on its own slow clock, well under the rate anything it reports changes at.
-const chronicle = new Chronicle();
+let chronicle = new Chronicle();
 let nextChronicle = 0;
 let nextShapes = 0;
 
@@ -152,11 +155,73 @@ document.getElementById("sign")!.addEventListener("click", (e) => {
   running = speed > 0;
 });
 
-document.getElementById("reseed")!.addEventListener("click", () => {
-  if (!confirm("Throw this case away and inherit a different one? The scars do not transfer.")) return;
-  localStorage.removeItem(SAVE_KEY);
-  location.reload();
+/**
+ * Throwing the case away.
+ *
+ * This used to ask with `confirm()` and then `location.reload()`. Both are unavailable inside a
+ * sandboxed frame — the dialog never opens and the reload never happens — so the button did
+ * nothing at all wherever the page is embedded. It now asks in the page itself and builds the
+ * new case in place, which works everywhere and is also faster.
+ */
+const reseedBtn = document.getElementById("reseed") as HTMLButtonElement;
+let armed = false;
+let disarm: ReturnType<typeof setTimeout> | undefined;
+
+reseedBtn.addEventListener("click", () => {
+  if (!armed) {
+    // One click arms it, a second throws the case away. A destructive button gets asked twice.
+    armed = true;
+    reseedBtn.textContent = "throw it away?";
+    reseedBtn.classList.add("armed");
+    clearTimeout(disarm);
+    disarm = setTimeout(() => {
+      armed = false;
+      reseedBtn.textContent = "new case";
+      reseedBtn.classList.remove("armed");
+    }, 4000);
+    return;
+  }
+  clearTimeout(disarm);
+  armed = false;
+  reseedBtn.textContent = "new case";
+  reseedBtn.classList.remove("armed");
+  newCase();
 });
+
+function newCase(): void {
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* no storage; nothing to clear */ }
+  running = false;
+  noticeEl.textContent = "settling a new case…";
+  noticeEl.classList.add("show");
+  // Give the browser a frame to paint that before the settling blocks the thread.
+  requestAnimationFrame(() => setTimeout(() => {
+    world = new World({ seed: (Math.random() * 1e9) | 0 });
+    world.init();
+    renderer = new Renderer(world);
+    cam = new Camera(world.w / 2, world.h / 2, fitScale());
+    chronicle = new Chronicle();
+    probeAt = null;
+    nextChronicle = 0;
+    nextShapes = 0;
+    owed = 0;
+    lastTime = performance.now();
+    running = speed > 0;
+    readout.textContent = "Shift-click, or click a tool then the ground.";
+    drawStats();
+    drawShapes();
+    drawChronicle();
+    flash("You inherited a different case. The scars did not transfer.");
+  }, 30));
+}
+
+/**
+ * Open filling the frame: there is only one volume, so arriving letterboxed inside it just makes
+ * the case look like a picture of a case.
+ */
+function fitScale(): number {
+  const fit = Math.min(canvas.width, canvas.height) * 0.94 / world.h;
+  return Math.max(1.2, Math.min(12, fit));
+}
 
 function flash(msg: string): void {
   noticeEl.textContent = msg;
@@ -288,10 +353,7 @@ noticeEl.textContent = "settling the case…";
 noticeEl.classList.add("show");
 requestAnimationFrame(() => setTimeout(() => {
   boot();
-  // Open filling the frame: there is only one volume, so arriving letterboxed inside it
-  // just makes the case look like a picture of a case.
-  const fit = Math.min(canvas.width, canvas.height) * 0.94 / world.h;
-  cam = new Camera(world.w / 2, world.h / 2, Math.max(1.2, Math.min(12, fit)));
+  cam = new Camera(world.w / 2, world.h / 2, fitScale());
   renderer = new Renderer(world);
   drawStats();
   drawShapes();

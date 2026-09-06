@@ -175,6 +175,12 @@
   }
   #reseed { color: var(--faint); }
   #reseed:hover { color: #c98d80; border-color: #4a2f2c; }
+  /* Armed: the next click actually throws the case away, so it stops looking incidental. */
+  #reseed.armed {
+    color: #f0b3a4;
+    border-color: #7c4038;
+    background: #40201cb0;
+  }
 
   input[type="range"] {
     width: 74px;
