@@ -1,26 +1,19 @@
 {
-  "name": "soul-harvest",
+  "name": "still-tank",
+  "private": true,
   "version": "0.1.0",
-  "description": "Incremental soul-harvesting clicker merge game for Android",
   "type": "module",
+  "description": "A case of living weather. You change one thing. You live with the next version.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "cap:sync": "npm run build && npx cap sync android",
-    "cap:open": "npx cap open android"
-  },
-  "dependencies": {
-    "@capacitor/android": "^6.2.0",
-    "@capacitor/core": "^6.2.0",
-    "@capacitor/haptics": "^6.0.2",
-    "@capacitor/status-bar": "^6.0.2"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
-    "typescript": "^5.7.3",
-    "vite": "^6.0.7",
-    "vitest": "^3.0.5"
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
   }
 }
